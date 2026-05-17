@@ -1,131 +1,170 @@
-# Le Clos Bon Accueil — Réservation Epeaux
+# 🏡 Le Clos Bon Accueil — Réservation Épeaux
 
-Application web de **gestion des chambres** pour une maison familiale à beaucoup de chambres.
-Permet à la famille et aux amis de consulter les disponibilités, réserver une chambre,
-et donne au propriétaire un espace d'administration pour piloter la maison et les séjours.
+> Application web de gestion des séjours pour une maison familiale à chambres multiples.  
+> Famille et amis consultent les disponibilités et réservent en autonomie.  
+> Le propriétaire pilote l'ensemble depuis un espace d'administration dédié.
 
-> **Pas de paiement en ligne.** Le prix affiché est purement indicatif — le règlement
-> (ou la gratuité) se fait de la main à la main, à l'arrivée.
+**Pas de paiement en ligne.** Le tarif affiché est purement indicatif — le règlement (ou la gratuité) se fait de la main à la main, à l'arrivée.
 
 ---
 
 ## ✨ Fonctionnalités
 
 ### Côté invités (famille & amis)
-- **Accueil** — salutation, mot du jour, mot d'accueil du propriétaire, qui est là cette semaine, chambres en vedette
-- **Liste des chambres** — 12 chambres, filtres (libres ce soir, famille, par aile, par étage)
-- **Fiche chambre détaillée** — photo (déposable), description, couchage, capacité, surface, étage, équipements, linge fourni, prochains séjours
-- **Calendrier** — vue timeline horizontale style Airbnb, une semaine à la fois, navigation par semaine
-- **Tunnel de réservation 4 étapes** — dates → chambre → invités → mot → récapitulatif → confirmation
-- **Mes séjours** — réservations à venir (avec actions modifier / annuler) et historique
-- **Indication de prix** — total calculé `nuits × personnes × tarif/personne/nuit`
+
+| Écran | Ce qu'il fait |
+|---|---|
+| **Accueil** | Salutation personnalisée, mot du jour, message d'accueil du propriétaire, qui est là cette semaine, chambres en vedette |
+| **Liste des chambres** | 12 chambres avec filtres : libres ce soir, famille, par aile, par étage |
+| **Fiche chambre** | Photo déposable, description, couchage, capacité, surface, équipements, linge fourni, prochains séjours |
+| **Calendrier** | Vue timeline horizontale style Airbnb, une semaine à la fois, navigation avant/arrière |
+| **Tunnel de réservation** | 4 étapes guidées : dates → chambre → invités & message → récapitulatif → confirmation |
+| **Mes séjours** | Réservations à venir (modifier / annuler) et historique des séjours passés |
+
+Le prix indicatif est calculé selon la formule : `nuits × personnes × tarif/personne/nuit`.
 
 ### Côté administrateur
-- **Tableau de bord** — KPIs, prochaines arrivées, actions rapides
-- **Réservations** — toutes les résas (filtre À venir / Passées / Toutes, recherche par nom ou chambre, groupées par mois)
-- **Édition réservation** — créer, modifier, supprimer, avec détection de conflit
-- **Lieu** — deux sous-onglets :
-  - **Chambres** — créer, modifier, supprimer une chambre (avec gestion en cascade des réservations)
-  - **Maison** — identité de la maison, listes de configuration (parties, équipements proposés, linge proposé)
-- **Photos déposables** — glisser-déposer une image sur n'importe quelle chambre (persistance locale)
+
+| Écran | Ce qu'il fait |
+|---|---|
+| **Tableau de bord** | KPIs clés, prochaines arrivées, actions rapides |
+| **Réservations** | Liste complète avec filtres (À venir / Passées / Toutes), recherche par nom ou chambre, groupées par mois |
+| **Édition réservation** | Créer, modifier, supprimer — avec détection automatique de conflit de dates |
+| **Lieu › Chambres** | CRUD complet des chambres avec suppression en cascade des réservations liées |
+| **Lieu › Maison** | Identité de la maison, listes de configuration (parties, équipements proposés, linge proposé) |
+| **Photos déposables** | Glisser-déposer une image sur n'importe quelle chambre ; persistance locale via sidecar |
 
 ### Responsive
-- **Mobile** (`< 640px`) — plein écran, barre d'onglets en bas, safe-area iOS
-- **Tablette** (`640–1024px`) — sidebar collapsée à 72 px (icônes seules)
-- **Desktop** (`≥ 1024px`) — sidebar complète 240 px avec labels, contenu centré à 920 px
+
+| Contexte | Comportement |
+|---|---|
+| **Mobile** `< 640 px` | Plein écran, barre d'onglets en bas, safe-area iOS respectée |
+| **Tablette** `640–1024 px` | Sidebar collapsée à 72 px (icônes seules) |
+| **Desktop** `≥ 1024 px` | Sidebar complète 240 px avec labels, contenu centré à 920 px max |
 
 ---
 
 ## 🎨 Direction artistique
 
-Esthétique **éditoriale cottage** :
+Esthétique **éditoriale cottage** — crème chaud, brun encre, terracotta et sauge. Labels en capitales espacées, filets fins, italiques pour la voix, papier crème pour les cartes.
 
-| Token | Valeur |
-|---|---|
-| Fond | `#F5EFE5` (crème chaud) |
-| Encre | `#2A2218` (brun très foncé) |
-| Accent | `#B05A3C` (terracotta) |
-| Secondaire | `#7B8B6F` (sauge) |
-| Serif | *Cormorant Garamond* |
-| Sans | *DM Sans* |
-| Mono | *JetBrains Mono* |
-
-Les labels en capitales espacées, les filets fins, les italiques pour la voix, le papier crème pour les cartes.
+| Token | Valeur | Usage |
+|---|---|---|
+| `--bg` | `#F5EFE5` | Fond général (crème chaud) |
+| `--paper` | `#FBF7F0` | Cartes et surfaces |
+| `--ink` | `#2A2218` | Texte principal (brun très foncé) |
+| `--muted` | `#8A7D6B` | Texte secondaire |
+| `--terracotta` | `#B05A3C` | Accent principal |
+| `--sage` | `#7B8B6F` | Accent secondaire |
+| `--serif` | *Cormorant Garamond* | Titres, voix éditoriale |
+| `--sans` | *DM Sans* | Interface, corps de texte |
+| `--mono` | *JetBrains Mono* | Labels techniques, étiquettes |
 
 ---
 
 ## 🏗️ Architecture
 
-Application **React + Babel standalone** (sans build), un seul point d'entrée HTML.
+Application **React + Babel standalone** — zéro outil de build, un seul point d'entrée HTML.
 
 ```
-index.html              ← Point d'entrée, monte <App /> dans #root
-styles.css              ← Tokens (couleurs, type, espacements) + responsive
-data.jsx                ← Données (chambres, réservations, config maison) + CRUD store
-ui.jsx                  ← Primitives partagées (TopBar, TabBar, SidebarNav,
-                          RoomCard, ConfirmDialog, Toast, photos…)
-screens-main.jsx        ← Accueil, Liste chambres, Fiche chambre
+index.html              ← Point d'entrée ; monte <App /> dans #root
+styles.css              ← Tokens design (couleurs, typo, espacements) + responsive
+data.jsx                ← Données statiques (ROOMS, BOOKINGS, HOUSE_CONFIG) + store pub/sub
+ui.jsx                  ← Primitives partagées : TopBar, TabBar, SidebarNav,
+                          RoomCard, ConfirmDialog, Toast, icônes…
+screens-main.jsx        ← Accueil, Liste des chambres, Fiche chambre
 screens-flow.jsx        ← Calendrier, Tunnel de réservation, Mes séjours
-screens-admin.jsx       ← Dashboard, Réservations admin, Lieu (Chambres/Maison)
+screens-admin.jsx       ← Dashboard, Réservations admin, Lieu (Chambres / Maison)
 app.jsx                 ← Routeur stack + composition des layouts
-tweaks-panel.jsx        ← Framework Tweaks (panneau de personnalisation)
-image-slot.js           ← Web component pour les photos déposables
+tweaks-panel.jsx        ← Panneau de personnalisation en direct
+image-slot.js           ← Web component natif pour les photos déposables
 ```
 
 ### Routage
-Routeur stack maison (push/pop/reset). Pas de React Router — simple, suffisant.
 
-### Données
-Les listes `ROOMS`, `BOOKINGS`, `HOUSE_CONFIG` sont en mémoire, mutées en place. Un système
-de pub/sub (`storeBump` / `useStoreSubscribe`) déclenche le re-render des composants
-abonnés. **À brancher sur un vrai backend** pour la mise en production.
+Routeur stack maison (`push` / `pop` / `reset`). Pas de React Router — simple et suffisant pour cette navigation linéaire.
+
+### Données & état
+
+`ROOMS`, `BOOKINGS` et `HOUSE_CONFIG` vivent en mémoire et sont mutés en place. Un système pub/sub léger (`storeBump` / `useStoreSubscribe`) déclenche le re-render des composants abonnés.
+
+> ⚠️ **À brancher sur un vrai backend** avant toute mise en production — les données ne persistent pas au rechargement.
+
+### Web component `<image-slot>`
+
+Composant natif (sans framework) qui gère le glisser-déposer, le recadrage interactif (pan + zoom en mode cover), la compression WebP via Canvas, et la persistance dans un sidecar JSON. Compatible avec les slots sans identifiant (session uniquement) et avec les slots identifiés (sidecar persistant).
 
 ---
 
 ## 🚀 Lancement
 
-Aucune dépendance, aucun build. Ouvre simplement `index.html` dans un navigateur,
-ou sers le dossier avec un serveur statique :
+Aucune dépendance, aucun build.
 
 ```bash
-# Avec Python
+# Option 1 — Python
 python3 -m http.server 8080
 
-# Avec Node
+# Option 2 — Node
 npx serve .
+
+# Option 3 — ouvrir directement
+open index.html
 ```
 
-Puis va sur http://localhost:8080.
+Puis ouvrir [http://localhost:8080](http://localhost:8080).
 
 ---
 
-## 🛠️ Personnalisation (Tweaks)
+## 🛠️ Personnalisation (panneau Tweaks)
 
-Un panneau **Tweaks** flottant permet d'ajuster en direct :
-- Mode (Utilisateur / Administrateur)
-- Couleur d'accent
-- Couleur de fond (incl. mode nuit)
-- Police d'affichage
-- Prénom de l'utilisateur connecté
+Un panneau flottant (⚙️) permet d'ajuster l'application en direct, sans rechargement :
 
----
-
-## 📝 Limites connues / TODO
-
-- Pas de backend — toutes les données sont en mémoire et reset au reload
-- Pas d'authentification réelle (le mode admin est un simple toggle)
-- Photos chambres persistées via web component local, pas d'upload distant
-- Pas de notifications email / SMS (mentionnées dans l'UI mais non implémentées)
-- Le mot d'accueil et l'identité de la maison sont mutables côté admin mais ne se
-  reflètent pas encore partout dans l'UI
+- **Mode** — Utilisateur / Administrateur
+- **Couleur d'accent** — terracotta, sauge, ambre…
+- **Couleur de fond** — crème, blanc, mode nuit
+- **Police d'affichage** — DM Sans, Cormorant Garamond, système
+- **Prénom de l'utilisateur** connecté (affiché sur l'écran d'accueil)
 
 ---
 
-## 📦 Stack
+## 📦 Stack technique
 
-- React 18.3.1 (UMD via CDN, pinné)
-- Babel Standalone 7.29.0 (transformation JSX dans le navigateur)
-- DM Sans, Cormorant Garamond, JetBrains Mono (Google Fonts)
-- Composant natif `<image-slot>` pour les photos
+| Brique | Version | Intégration |
+|---|---|---|
+| React | 18.3.1 | UMD via CDN (unpkg), pinné avec SRI |
+| Babel Standalone | 7.29.0 | Transformation JSX dans le navigateur |
+| DM Sans | — | Google Fonts |
+| Cormorant Garamond | — | Google Fonts |
+| JetBrains Mono | — | Google Fonts |
+| `<image-slot>` | — | Web component natif, inclus localement |
 
-Aucune dépendance NPM. Aucun outil de build. Un dossier, un `index.html`, c'est tout.
+**Aucune dépendance NPM. Aucun outil de build.** Un dossier, un `index.html`, c'est tout.
+
+---
+
+## 📝 Limites connues & TODO
+
+- **Pas de backend** — toutes les données sont en mémoire et se réinitialisent au rechargement
+- **Pas d'authentification réelle** — le mode admin est un simple toggle dans le panneau Tweaks
+- **Photos** — persistées localement via le web component, pas d'upload vers un stockage distant
+- **Notifications email / SMS** — mentionnées dans l'UI mais non implémentées
+- **Identité de la maison** — modifiable côté admin mais le changement ne se propage pas encore à tous les composants de l'UI
+- **Babel standalone en production** — préférable de pré-compiler le JSX pour améliorer les performances au chargement
+
+---
+
+## 🗂️ Structure des fichiers
+
+```
+le-clos-bon-accueil/
+├── index.html            ← Unique point d'entrée
+├── styles.css            ← Système de design complet
+├── image-slot.js         ← Web component photos
+├── data.jsx              ← Store de données
+├── ui.jsx                ← Composants UI partagés
+├── screens-main.jsx      ← Écrans invités principaux
+├── screens-flow.jsx      ← Calendrier & réservation
+├── screens-admin.jsx     ← Interface administrateur
+├── app.jsx               ← Composition & routage
+└── tweaks-panel.jsx      ← Panneau de personnalisation
+```
