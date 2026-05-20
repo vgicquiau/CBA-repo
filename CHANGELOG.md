@@ -85,3 +85,42 @@ $ npm run test --workspace=shared-types
 - Tests `toAppDateString` : couvrent UTC+1 hiver et UTC+2 été.
 
 ---
+
+## ✅ Phase P3 — Backend : Repository et erreurs typées
+
+**Date** : 2026-05-21
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `backend/src/data/repository.ts` | Interface `Repository` (20 méthodes), 5 classes d'erreur typées, stub factory |
+| `backend/src/data/repository.test.ts` | 15 tests (5 classes d'erreur) |
+| `backend/src/shared/identifiers.ts` | `generateBookingReference()` — CLOS-XXXXXXXX, base32 sans ambiguïté |
+| `backend/src/shared/identifiers.test.ts` | 5 tests |
+| `backend/src/api/http.ts` | ok, created, noContent, errorResponse, auth helpers, parseBody/Query/Path, withErrorHandling |
+| `backend/src/api/http.test.ts` | 25 tests (helpers HTTP + 8 mappings d'erreur) |
+| `backend/src/api/logger.ts` | Singleton Powertools Logger |
+| `backend/src/api/deps.ts` | `getRepository()` singleton |
+| `backend/package.json` | Dépendances pinnées (@aws-sdk, Powertools, zod, uuid, @types/node) |
+
+### Commandes exécutées et résultats
+
+```
+$ npm run typecheck --workspace=backend
+✅ 0 errors
+
+$ npm run test --workspace=backend
+✅ 45 tests pass
+   repository.test.ts : 15 tests
+   identifiers.test.ts : 5 tests
+   http.test.ts : 25 tests
+```
+
+### Décisions / Obstacles
+
+- Fonctions HTTP retournent `APIGatewayProxyStructuredResultV2` (évite union `| string`).
+- Erreurs DynamoDB catchées par `err.name` (pas de dépendance supplémentaire sur les SDK types).
+- `_resetRepository()` exposé pour tests unitaires des handlers (P4).
+
+---

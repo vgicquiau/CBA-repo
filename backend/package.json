@@ -9,9 +9,18 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@clos/shared-types": "*"
+    "@aws-lambda-powertools/logger": "2.13.1",
+    "@aws-sdk/client-dynamodb": "3.651.1",
+    "@aws-sdk/lib-dynamodb": "3.651.1",
+    "@clos/shared-types": "*",
+    "uuid": "10.0.0",
+    "zod": "3.23.8"
   },
   "devDependencies": {
+    "@types/aws-lambda": "8.10.145",
+    "@types/node": "20.14.11",
+    "@types/uuid": "10.0.0",
+    "aws-sdk-client-mock": "4.1.0",
     "vitest": "1.6.0"
   }
 }
