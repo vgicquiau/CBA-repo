@@ -598,82 +598,38 @@ Crée `frontend/src/api/client.ts` exportant un wrapper `fetch` qui :
 Exporte **exactement** :
 
 ```typescript
-// GET /v1/rooms — consommé par : RoomsScreen, HomeScreen (featured rooms)
+// Queries
 export function useRooms(): UseQueryResult<Room[]>;
-
-// GET /v1/rooms/{roomId} — consommé par : RoomDetailScreen, BookingStepRoom, BookingRecap, ConfirmationScreen
 export function useRoom(roomId: string): UseQueryResult<Room>;
-
-// GET /v1/rooms/{roomId}/bookings — consommé par : RoomDetailScreen (section "Prochains séjours")
 export function useRoomBookings(roomId: string, from?: string): UseQueryResult<Booking[]>;
-
-// GET /v1/rooms/{roomId}/availability — consommé par : BookingStepRoom (filtre chambres disponibles)
 export function useRoomAvailability(roomId: string, start: string, end: string): UseQueryResult<AvailabilityResult>;
-
-// GET /v1/bookings/me — consommé par : MyBookingsScreen, TabBar (badge count éventuel)
 export function useMyBookings(): UseQueryResult<Booking[]>;
-
-// GET /v1/bookings/{bookingId} — consommé par : EditBookingScreen (rechargement)
 export function useBooking(bookingId: string): UseQueryResult<Booking>;
-
-// GET /v1/house — consommé par : HomeScreen (welcomeNote, featured rooms), AdminHouseConfig
 export function useHouseConfig(): UseQueryResult<HouseConfig>;
-
-// GET /v1/me — consommé par : App (AuthProvider, isAdmin check), HomeScreen (prénom)
 export function useMe(): UseQueryResult<User>;
 
-// GET /v1/admin/dashboard — consommé par : AdminDashboard
+// Admin queries
 export function useAdminDashboard(): UseQueryResult<DashboardData>;
-
-// GET /v1/admin/bookings — consommé par : AdminBookingsScreen
 export function useAdminBookings(filter: BookingFilter, search?: string): UseQueryResult<Booking[]>;
-
-// GET /v1/admin/bookings/{bookingId} — consommé par : AdminEditBookingScreen
 export function useAdminBooking(bookingId: string): UseQueryResult<Booking>;
-
-// GET /v1/admin/users — consommé par : (post-MVP)
 export function useAdminUsers(): UseQueryResult<User[]>;
-
-// GET /v1/admin/house — consommé par : AdminHouseConfig (onglet Maison)
 export function useAdminHouse(): UseQueryResult<HouseConfig>;
 
-// POST /v1/bookings — consommé par : ConfirmationScreen (onConfirm)
+// Mutations user
 export function useCreateBooking(): UseMutationResult<Booking, ApiError, CreateBookingInput>;
-
-// PATCH /v1/bookings/{bookingId} — consommé par : EditBookingScreen (onSave)
 export function useUpdateBooking(): UseMutationResult<Booking, ApiError, { bookingId: string; patch: UpdateBookingInput }>;
-
-// DELETE /v1/bookings/{bookingId} — consommé par : MyBookingCard (onCancel)
 export function useDeleteBooking(): UseMutationResult<void, ApiError, string>;
-
-// DELETE /v1/me — consommé par : profil utilisateur (RGPD)
 export function useDeleteMe(): UseMutationResult<void, ApiError, void>;
 
-// POST /v1/admin/bookings — consommé par : AdminEditBookingScreen (isNew)
+// Mutations admin
 export function useAdminCreateBooking(): UseMutationResult<Booking, ApiError, AdminCreateBookingInput>;
-
-// PATCH /v1/admin/bookings/{bookingId} — consommé par : AdminEditBookingScreen (edit)
 export function useAdminUpdateBooking(): UseMutationResult<Booking, ApiError, { bookingId: string; patch: AdminUpdateBookingInput }>;
-
-// DELETE /v1/admin/bookings/{bookingId} — consommé par : AdminEditBookingScreen (delete)
 export function useAdminDeleteBooking(): UseMutationResult<void, ApiError, string>;
-
-// POST /v1/admin/rooms — consommé par : AdminEditRoomScreen (isNew)
 export function useCreateRoom(): UseMutationResult<Room, ApiError, CreateRoomInput>;
-
-// PATCH /v1/admin/rooms/{roomId} — consommé par : AdminEditRoomScreen (edit)
 export function useUpdateRoom(): UseMutationResult<Room, ApiError, { roomId: string; patch: UpdateRoomInput }>;
-
-// DELETE /v1/admin/rooms/{roomId} — consommé par : AdminEditRoomScreen (delete + cascade)
 export function useDeleteRoom(): UseMutationResult<DeleteRoomResult, ApiError, string>;
-
-// POST /v1/admin/rooms/{roomId}/photo-upload-url — consommé par : AdminEditRoomScreen (photo drag-drop)
 export function useUploadRoomPhoto(): UseMutationResult<{ photoUrl: string }, ApiError, { roomId: string; file: File }>;
-
-// POST /v1/admin/users/invite — consommé par : gestion utilisateurs admin (post-MVP)
 export function useInviteUser(): UseMutationResult<User, ApiError, InviteUserInput>;
-
-// PATCH /v1/admin/house — consommé par : AdminHouseConfig (onBlur champs)
 export function useUpdateHouseConfig(): UseMutationResult<HouseConfig, ApiError, UpdateHouseConfigInput>;
 ```
 
@@ -691,31 +647,3 @@ via `queryClient.invalidateQueries({ queryKey: [...] })`. Exemples :
   `['rooms', roomId, 'bookings']`, `['admin', 'dashboard']`.
 - `useDeleteRoom` → invalide `['rooms']`, `['admin', 'bookings']`,
   `['admin', 'dashboard']`.
-
----
-
-## 2.10 — Mapping exhaustif écrans → appels API
-
-Ce tableau est la référence canonique pour savoir quels endpoints sont appelés par
-quel écran. Claude Code ne doit **jamais** inventer des appels API non listés ici.
-
-| Écran (nom route) | Hooks / Mutations | Appels API correspondants |
-|---|---|---|
-| `home` | `useHouseConfig`, `useRooms`, `useMyBookings` | `GET /v1/house`, `GET /v1/rooms`, `GET /v1/bookings/me` |
-| `rooms` | `useRooms` | `GET /v1/rooms` |
-| `room` | `useRoom`, `useRoomBookings` | `GET /v1/rooms/{roomId}`, `GET /v1/rooms/{roomId}/bookings` |
-| `calendar` | `useRooms`, `useRoomBookings` (toutes) | `GET /v1/rooms`, `GET /v1/rooms/{id}/bookings` × N |
-| `me` | `useMyBookings` | `GET /v1/bookings/me` |
-| `edit-booking` | `useBooking`, `useUpdateBooking` | `GET /v1/bookings/{id}`, `PATCH /v1/bookings/{id}` |
-| `book-dates` | (local state seulement) | — |
-| `book-room` | `useRooms`, `useRoomAvailability` | `GET /v1/rooms`, `GET /v1/rooms/{id}/availability` |
-| `book-guests` | `useRoom` | `GET /v1/rooms/{roomId}` (pour capacity max) |
-| `book-notes` | (local state seulement) | — |
-| `book-recap` | `useRoom` | `GET /v1/rooms/{roomId}` |
-| `confirmation` | `useCreateBooking` | `POST /v1/bookings` |
-| `admin-home` | `useAdminDashboard` | `GET /v1/admin/dashboard` |
-| `admin-bookings` | `useAdminBookings` | `GET /v1/admin/bookings` |
-| `admin-edit-booking` | `useAdminBooking`, `useAdminCreateBooking`, `useAdminUpdateBooking`, `useAdminDeleteBooking` | `GET /v1/admin/bookings/{id}`, `POST`, `PATCH`, `DELETE /v1/admin/bookings` |
-| `admin-lieu` (onglet chambres) | `useRooms`, `useCreateRoom`, `useUpdateRoom`, `useDeleteRoom`, `useUploadRoomPhoto` | `GET /v1/rooms`, `POST /v1/admin/rooms`, `PATCH`, `DELETE`, `POST photo-upload-url` |
-| `admin-lieu` (onglet maison) | `useAdminHouse`, `useUpdateHouseConfig` | `GET /v1/admin/house`, `PATCH /v1/admin/house` |
-| `admin-edit-room` | `useCreateRoom`, `useUpdateRoom`, `useDeleteRoom`, `useUploadRoomPhoto` | `POST /v1/admin/rooms`, `PATCH`, `DELETE`, `POST photo-upload-url` |

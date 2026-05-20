@@ -330,132 +330,35 @@ par le wrapper `client.ts` (cf. `02-api-contract § 2.9.1`).
 via le flow `USER_PASSWORD_AUTH` (`Auth.signIn({ username: email, password })`).
 Un écran de login custom (cf. § 3.4.5) gère la saisie.
 
-### 3.4.3 — Migration du prototype (sources réelles)
+### 3.4.3 — Migration du prototype
+Le prototype actuel (`data.jsx`, `app.jsx`, `screens-*.jsx`, etc.) est en
+React 18 + Babel standalone (sans build). La migration vers Vite suit
+ces étapes impératives :
 
-**Règle absolue** : le rendu visuel doit être **pixel-perfect** par rapport au prototype.
-Si un doute existe sur un détail CSS, le prototype fait foi.
-
-#### Inventaire des fichiers source à migrer
-
-| Fichier proto | Fichier cible Vite | Action |
-|---|---|---|
-| `app.jsx` | `frontend/src/App.tsx` | Convertir en TSX, remplacer `useTweaks(DEFAULTS)` par `AuthProvider` + `useMe()`, garder routeur stack push/pop/reset |
-| `screens-main.jsx` | `frontend/src/screens/home.tsx`, `rooms.tsx`, `room-detail.tsx` | Séparer en 3 fichiers, remplacer `ROOMS` / `BOOKINGS` par hooks |
-| `screens-flow.jsx` | `frontend/src/screens/calendar.tsx`, `booking-flow.tsx`, `my-bookings.tsx` | Séparer en 3 fichiers, remplacer données mock par hooks |
-| `screens-admin.jsx` | `frontend/src/screens/admin-dashboard.tsx`, `admin-bookings.tsx`, `admin-rooms.tsx`, `admin-house.tsx` | Séparer en 4 fichiers, remplacer CRUD mock par mutations hooks |
-| `ui.jsx` | `frontend/src/ui/index.tsx` | Conversion directe en TSX, ajouter types props |
-| `styles.css` | `frontend/src/styles.css` | Copie verbatim — NE PAS MODIFIER |
-| `data.jsx` | ❌ SUPPRIMER | Remplacé par hooks React Query |
-| `tweaks-panel.jsx` | ❌ SUPPRIMER | Hors-scope production |
-| `image-slot.js` | `frontend/src/ui/image-slot.ts` | Copie verbatim (Web Component natif, pas de conversion) |
-
-#### Contenu des fichiers cibles
-
-- **`booking-flow.tsx`** : contient `BookingStepDates`, `BookingStepRoom`, `BookingStepGuests`, `BookingStepNotes`, `BookingRecap`, `ConfirmationScreen`.
-- **`my-bookings.tsx`** : contient `MyBookingsScreen`, `EditBookingScreen`, `MyBookingCard`.
-- **`admin-rooms.tsx`** : contient `AdminLieuScreen` (onglet Chambres), `AdminRoomsList`, `AdminEditRoomScreen`.
-- **`admin-house.tsx`** : contient `AdminHouseConfig`, `ConfigSection`, `FieldRow`, `ListEditor`.
-
-#### Routeur stack (à conserver tel quel)
-
-Le routeur stack maison (`push`, `pop`, `reset`) de `app.jsx` est **conservé identique**.
-Il gère ces routes (noms exacts du prototype, à ne pas renommer) :
-
-**Côté guest :**
-- `home` → `<HomeScreen />`
-- `rooms` → `<RoomsScreen />`
-- `room` (+ prop `roomId`) → `<RoomDetailScreen />`
-- `calendar` → `<CalendarScreen />`
-- `me` → `<MyBookingsScreen />`
-- `edit-booking` → `<EditBookingScreen />`
-- `book-dates` → `<BookingStepDates />`
-- `book-room` → `<BookingStepRoom />`
-- `book-guests` → `<BookingStepGuests />`
-- `book-notes` → `<BookingStepNotes />`
-- `book-recap` → `<BookingRecap />`
-- `confirmation` → `<ConfirmationScreen />`
-
-**Côté admin :**
-- `admin-home` → `<AdminDashboard />`
-- `admin-bookings` → `<AdminBookingsScreen />`
-- `admin-edit-booking` → `<AdminEditBookingScreen />`
-- `admin-lieu` → `<AdminLieuScreen />` (avec sous-onglets `rooms` / `house`)
-- `admin-edit-room` → `<AdminEditRoomScreen />`
-
-**La TabBar est masquée** (`hideTabBar = true`) sur ces routes :
-`book-dates`, `book-room`, `book-guests`, `book-notes`, `book-recap`,
-`confirmation`, `edit-booking`, `admin-edit-booking`, `admin-edit-room`.
-
-#### Suppression du toggle adminMode
-
-Le toggle `adminMode` dans `tweaks-panel.jsx` est supprimé.
-L'App switche entre mode guest et mode admin via :
-
-```typescript
-const { data: me } = useMe();
-const isAdmin = me?.role === 'admin';
-
-useEffect(() => {
-  if (isAdmin && !top.name.startsWith('admin')) reset('admin-home');
-  else if (!isAdmin && top.name.startsWith('admin')) reset('home');
-}, [isAdmin]);
-```
-
-#### Données mockées → hooks (mapping exhaustif)
-
-| Référence dans proto | Remplacement production |
-|---|---|
-| `ROOMS` (array global) | `useRooms().data ?? []` |
-| `ROOMS.find(r => r.id === roomId)` | `useRoom(roomId).data` |
-| `BOOKINGS` (array global) | `useAdminBookings(filter).data ?? []` |
-| `MY_BOOKINGS` (array global) | `useMyBookings().data ?? []` |
-| `HOUSE_CONFIG` (objet global) | `useHouseConfig().data` |
-| `upsertBooking(...)` | `useCreateBooking().mutate(...)` ou `useUpdateBooking().mutate(...)` |
-| `deleteBooking(id)` | `useDeleteBooking().mutate(id)` |
-| `storeBump()` / `useStoreSubscribe()` | React Query gère l'invalidation automatiquement |
-
-#### État de chargement (loading states)
-
-Pour chaque hook consommé dans un écran, ajoute un état de chargement :
-
-```typescript
-const { data: rooms, isLoading } = useRooms();
-if (isLoading) return <PageSkeleton />;
-```
-
-Crée un composant `<PageSkeleton />` dans `frontend/src/ui/index.tsx` qui affiche
-un simple spinner centré avec la couleur `var(--muted)`.
-
-#### Photo upload — RoomPhoto et image-slot
-
-Le composant `<image-slot>` est un Web Component natif du studio de design — conservé
-verbatim dans `frontend/src/ui/image-slot.ts`. Il est déclaré dans
-`frontend/src/vite-env.d.ts` :
-
-```typescript
-declare namespace JSX {
-  interface IntrinsicElements {
-    'image-slot': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement> & {
-      'room-id'?: string;
-      tint?: string;
-      label?: string;
-      placeholder?: string;
-    }, HTMLElement>;
-  }
-}
-```
-
-**En mode admin**, le drag-and-drop de `image-slot` est remplacé par :
-1. L'utilisateur glisse une photo → `image-slot` l'affiche localement.
-2. On déclenche `useUploadRoomPhoto().mutate({ roomId, file })` :
-   - Appelle `POST /v1/admin/rooms/{roomId}/photo-upload-url` → récupère `uploadUrl` + `publicUrl`.
-   - PUT direct vers `uploadUrl` avec le fichier.
-   - PATCH room avec `{ photoUrl: publicUrl }`.
-3. La Room est mise à jour → `useRoom(roomId)` est invalidé → réaffichage.
-
-**En mode guest**, `<RoomPhoto>` affiche `room.photoUrl` si présente (balise `<img>`),
-sinon le placeholder teinté (`tint-{photoTint}` CSS class) — identique au comportement
-actuel du prototype.
+1. **Bootstrap** : `cd frontend && npm create vite@latest -- --template react-ts`
+   puis nettoie le boilerplate.
+2. **Workspace** : ajoute `frontend/` au champ `workspaces` du
+   `package.json` racine. Ajoute `@clos/shared-types: "*"` aux
+   dépendances de `frontend/package.json`.
+3. **Styles** : recopie `styles.css` à l'identique dans `frontend/src/`.
+4. **Conversion** : convertis tous les `.jsx` en `.tsx` en utilisant les
+   types de `@clos/shared-types`.
+5. **Suppression de `data.jsx`** : supprime entièrement le store mock.
+   Remplace toute référence à `ROOMS`, `BOOKINGS`, `MY_BOOKINGS`,
+   `HOUSE_CONFIG` par les hooks React Query définis
+   `02-api-contract § 2.9.2`.
+6. **Suppression de `tweaks-panel.jsx`** : outil de prototypage, hors-MVP.
+7. **Suppression du toggle `adminMode` du Tweaks** : remplacé par la
+   lecture du groupe Cognito du user (`useMe().data.role === 'admin'`).
+8. **Routeur** : conserve le routeur stack maison (push/pop/reset) tel
+   quel au MVP. La migration vers React Router est post-MVP. Le flow
+   d'auth utilise `USER_PASSWORD_AUTH` qui ne nécessite aucune URL de
+   callback — le routeur stack reste donc parfaitement compatible.
+9. **Photos** : remplace `image-slot.js` par un composant React
+   `<RoomPhoto>` qui consomme `room.photoUrl`. Pour l'admin : drag-and-drop
+   déclenche `useUploadRoomPhoto` qui appelle
+   `POST /v1/admin/rooms/{roomId}/photo-upload-url`, fait un `PUT` direct
+   S3, puis `PATCH` sur la chambre avec le `photoUrl`.
 
 ### 3.4.4 — Catalogue des hooks à créer
 Voir `02-api-contract § 2.9.2` pour la liste exhaustive et la convention
@@ -477,62 +380,7 @@ Le composant `AuthProvider` wrap toute l'app et expose un context avec
 screen ; si `user === null`, affiche `<LoginScreen />` ; sinon, affiche
 le routeur.
 
-### 3.4.6 — Design tokens et règles CSS (NON NÉGOCIABLES)
-
-Le fichier `styles.css` est la **seule source de vérité visuelle**. Il est copié verbatim
-dans `frontend/src/styles.css`. Claude Code ne doit **jamais** :
-- Créer de nouvelles classes CSS qui dupliquent des tokens existants.
-- Utiliser Tailwind (pas dans ce projet).
-- Modifier les valeurs des tokens CSS custom (`:root { --bg, --ink, --terracotta… }`).
-- Utiliser des couleurs hex codées en dur dans les composants — toujours `var(--xxx)`.
-
-**Palette officielle (extraite de `styles.css`)** :
-
-| Token | Valeur | Usage |
-|---|---|---|
-| `--bg` | `#F5EFE5` | Fond global (crème chaud) |
-| `--paper` | `#FBF7F0` | Cards, surfaces surélevées |
-| `--paper-2` | `#EDE6D7` | Surfaces secondaires |
-| `--ink` | `#2A2218` | Texte principal (brun très foncé) |
-| `--ink-2` | `#4A3E2E` | Texte secondaire |
-| `--muted` | `#8A7D6B` | Texte tertiaire, placeholders |
-| `--line` | `rgba(42,34,24,0.12)` | Séparateurs |
-| `--line-2` | `rgba(42,34,24,0.06)` | Séparateurs légers (cards) |
-| `--terracotta` | `#B05A3C` | Accent primaire (CTA, admin badge) |
-| `--terracotta-soft` | `#E8C9B8` | Accent atténué |
-| `--sage` | `#7B8B6F` | Accent secondaire |
-| `--sage-soft` | `#D6DCC9` | Tags linge |
-| `--amber` | `#C28A3B` | Accent chaleureux (usage contextuel) |
-
-**Typographie officielle** :
-
-| Token | Font | Usage |
-|---|---|---|
-| `--serif` | Cormorant Garamond | Titres, prix, citations |
-| `--sans` | DM Sans | Texte courant, boutons |
-| `--mono` | JetBrains Mono | Labels uppercase, références `CLOS-XXXX` |
-
-**Tints de photo (12 valeurs exactes)** :
-`rosé`, `rouge`, `vert`, `ocre`, `bleu`, `pêche`, `gris`, `bois`, `pierre`, `lin`, `nuit`, `mousse`.
-
-**Classes utilitaires à conserver (de `styles.css`)** :
-`.serif`, `.serif-it`, `.label`, `.mono`, `.btn`, `.btn-primary`, `.btn-ghost`,
-`.btn-clay`, `.card`, `.tag`, `.tag-clay`, `.tag-sage`, `.row-tap`, `.avatar`, `.page`,
-`.page-actions`, `.hr`, `.dot-sep`, `.input`, `.no-scrollbar`, `.toast`,
-`.toast-success`, `.toast-error`, `.confirmation`, `.seal`, `.stepper`, `.photo`,
-`.photo-label`, `.tint-{name}`, `.topbar`, `.icon-btn`, `.tabbar`, `.tab`,
-`.sidebar`, `.sidebar-item`, `.timeline`, `.tl-booking`, `.minical`, `.modal-backdrop`,
-`.modal`, `.modal-warning`, `.modal-actions`.
-
-**Responsive (breakpoints)** :
-- Mobile `< 640px` : TabBar en bas, plein écran, safe-area iOS.
-- Tablette `640–1024px` : SidebarNav collapsée 72px (icônes seules), TabBar cachée.
-- Desktop `≥ 1024px` : SidebarNav complète 240px, contenu centré max-width 920px.
-
-**Fonts Google Fonts** : importées dans `styles.css` (ne pas réimporter dans `index.html`
-ou `main.tsx`).
-
-### 3.4.7 — Configuration Vite
+### 3.4.6 — Configuration Vite
 - `vite.config.ts` :
   - Plugin `@vitejs/plugin-react`.
   - `base: '/'`.

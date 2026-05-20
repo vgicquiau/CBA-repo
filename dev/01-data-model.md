@@ -459,76 +459,23 @@ Le mode `PAY_PER_REQUEST` reste largement sous le seuil de coût significatif
 
 Au premier déploiement, exécute un script `backend/scripts/seed.ts` qui :
 
-1. Crée le `HouseConfig` singleton avec les valeurs verbatim de `data.jsx`.
+1. Crée le `HouseConfig` singleton avec les valeurs par défaut du prototype
+   (`name: "Le Clos Bon Accueil"`, `region: "Normandie"`, etc. — extraits
+   verbatim de `data.jsx`).
 2. Crée les 12 Rooms du prototype (données verbatim de `ROOMS` dans `data.jsx`).
 3. **Sur l'environnement `dev` uniquement**, crée également 13 Bookings mock
    avec **des dates relatives à `today`** (et non absolues) pour rester
    pertinents au cours du temps :
-   - Calcule `today = todayIsoInAppTz()` en timezone `Europe/Paris`.
-   - La référence prototype est `TODAY = new Date(2026, 4, 15)` → `"2026-05-15"`.
-   - Décale chaque date : `newDate = today + (oldDate - "2026-05-15")`.
+   - Calcule `today` en timezone `Europe/Paris`.
+   - Décale les dates des 13 bookings de `data.jsx` selon le pattern :
+     `newStart = today + (oldStart - "2026-05-15")` (le `2026-05-15` est
+     la valeur `TODAY` hardcodée du prototype).
+   - Idem pour `end`.
 4. **N'effectue aucun seed sur `prod`** au-delà du `HouseConfig` et des 12
    Rooms. Les Bookings réels sont créés par les utilisateurs.
 
 Le seed est idempotent : il vérifie `attribute_not_exists(pk)` avant chaque
 write et skip silencieusement les items existants.
-
-### Note impérative sur `id` vs `roomId`
-
-Dans `data.jsx`, chaque room a un champ `id` (ex: `"glycine"`). Dans DynamoDB,
-la clé primaire est `roomId`. Le script `seed.ts` mappe : `room.id → room.roomId`.
-
-### 12 chambres à créer (slugs exacts, dans l'ordre de `data.jsx`)
-
-```
-glycine, coquelicot, tilleul, bergerie, pigeonnier, verger,
-lavoir, grange, cellier, mansarde, etoile, refuge
-```
-
-### HouseConfig initiale (valeurs verbatim de `data.jsx`)
-
-```typescript
-{
-  name: 'Le Clos Bon Accueil',
-  region: 'Normandie',
-  address: '5 chemin du Verger, 14XXX',
-  welcomeNote: "Les volets bleus ont été repeints. Et les hortensias sont en fleur. À très vite — Papa & Maman.",
-  wings: ['Aile gauche', 'Aile droite', 'Bâtiment principal', 'Dépendance'],
-  equipmentSuggestions: [
-    'Bureau', 'Vue jardin', 'Cheminée', 'TV', 'Velux',
-    'Salon attenant', 'Bouilloire', 'Sèche-cheveux',
-    'Coin lecture', 'Liseuse', 'Accès terrasse',
-  ],
-  linenSuggestions: [
-    'Draps fournis', 'Couette + 2 oreillers',
-    'Serviettes de bain', 'Serviette de toilette',
-    'Drap de bain', 'Peignoirs', 'Tapis de bain',
-    'Linge changé toutes les semaines',
-  ],
-}
-```
-
-### 13 Bookings mock (dev uniquement — noms réels pour un rendu réaliste)
-
-Les roomIds utilisent les slugs ci-dessus. Les dates sont recalculées relativement.
-
-| bookingId seed | roomId | name | offset start | offset end | people |
-|---|---|---|---|---|---|
-| b-01 | glycine | Claire & Antoine | +1j | +4j | 2 |
-| b-02 | glycine | Mamie Solange | +8j | +15j | 1 |
-| b-03 | coquelicot | Léa & Marion | +2j | +5j | 2 |
-| b-04 | tilleul | Pierre | +7j | +9j | 1 |
-| b-05 | bergerie | Famille Marchand | +3j | +10j | 3 |
-| b-06 | pigeonnier | Hugo & Sarah | +14j | +17j | 2 |
-| b-07 | verger | Tata Béné | +1j | +3j | 1 |
-| b-08 | verger | Camille | +10j | +12j | 2 |
-| b-09 | grange | Cousins Lefort | +5j | +9j | 4 |
-| b-10 | mansarde | Théo | +6j | +8j | 1 |
-| b-11 | etoile | Inès & Paul | +13j | +16j | 2 |
-| b-12 | refuge | Grand-père | +4j | +7j | 1 |
-| b-13 | cellier | Mathis | +11j | +14j | 2 |
-
-*Offsets calculés depuis `"2026-05-15"` → à recalculer dynamiquement à partir de `today`.*
 
 ---
 
