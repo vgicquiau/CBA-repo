@@ -50,3 +50,38 @@ $ npm run typecheck --workspaces
 - Stubs `export {};` créés dans chaque workspace pour satisfaire TypeScript (`TS18003 : No inputs found`). Ils seront remplacés phase par phase.
 
 ---
+
+## ✅ Phase P2 — Implémentation de `@clos/shared-types`
+
+**Date** : 2026-05-20
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `shared-types/src/domain.ts` | 4 interfaces : User, Room, Booking, HouseConfig + RoomPhotoTint + ROOM_PHOTO_TINTS |
+| `shared-types/src/dto.ts` | 10 Input/Output interfaces + BookingFilter + ApiError class |
+| `shared-types/src/dates.ts` | todayIsoInAppTz, toAppDateString, nightsBetween, intervalsOverlap + APP_TIMEZONE |
+| `shared-types/src/events.ts` | Type union DomainEvent (5 variants) |
+| `shared-types/src/index.ts` | Re-exports de tous les modules |
+| `shared-types/package.json` | Dépendance dayjs@1.11.13 (pinnée) |
+| `shared-types/src/dates.test.ts` | 19 tests unitaires |
+
+### Commandes exécutées et résultats
+
+```
+$ npm run typecheck --workspace=shared-types
+✅ 0 errors
+
+$ npm run test --workspace=shared-types
+✅ 19 tests pass
+   APP_TIMEZONE (1), todayIsoInAppTz (3), toAppDateString (4),
+   nightsBetween (5), intervalsOverlap (6)
+```
+
+### Décisions / Obstacles
+
+- `intervalsOverlap` : `s1 < e2 && s2 < e1` — correct pour YYYY-MM-DD lexicographique.
+- Tests `toAppDateString` : couvrent UTC+1 hiver et UTC+2 été.
+
+---
