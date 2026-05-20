@@ -582,7 +582,7 @@ Identique à dev mais :
 ### 3.8.4 — Rôle GitHub OIDC
 Crée manuellement (one-shot, document de bring-up § 3.11) ou via une
 stack CDK séparée `OidcStack` :
-- Trust policy : OIDC GitHub limité au repo `{org}/clos-bon-accueil`,
+- Trust policy : OIDC GitHub limité au repo `{org}/CBA-repo`,
   branche `main` pour dev, tags `v*` pour prod.
 - Permissions : `cloudformation:*` sur stacks préfixées
   `ClosBonAccueil-*`, plus les permissions de création des ressources

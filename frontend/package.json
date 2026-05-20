@@ -1,0 +1,19 @@
+{
+  "name": "@clos/frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@clos/shared-types": "*"
+  },
+  "devDependencies": {
+    "vitest": "1.6.0"
+  }
+}

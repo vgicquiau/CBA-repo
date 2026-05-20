@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+cdk.out/
+*.js.map
+*.tsbuildinfo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Frontend build
+frontend/dist/
+
+# CDK
+cdk.context.json
+
+# Playwright
+test-results/
+playwright-report/

@@ -1,0 +1,17 @@
+{
+  "name": "@clos/backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@clos/shared-types": "*"
+  },
+  "devDependencies": {
+    "vitest": "1.6.0"
+  }
+}
