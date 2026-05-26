@@ -135,7 +135,7 @@ export function getPathParam(
 
 // ─── withErrorHandling ────────────────────────────────────────────────────────
 
-type AnyHandler = Handler<APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2>;
+type AnyHandler = Handler<APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2>;
 
 export function withErrorHandling(h: AnyHandler): AnyHandler {
   return async (event, context, callback) => {

@@ -9,9 +9,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aws-lambda-powertools/logger": "2.13.1",
+    "@aws-lambda-powertools/logger": "^2.33.0",
+    "@aws-sdk/client-cognito-identity-provider": "3.651.1",
     "@aws-sdk/client-dynamodb": "3.651.1",
+    "@aws-sdk/client-s3": "3.651.1",
+    "@aws-sdk/client-sns": "3.651.1",
     "@aws-sdk/lib-dynamodb": "3.651.1",
+    "@aws-sdk/s3-request-presigner": "3.651.1",
     "@clos/shared-types": "*",
     "uuid": "10.0.0",
     "zod": "3.23.8"
