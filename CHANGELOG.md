@@ -174,3 +174,37 @@ $ npm run build --workspace=frontend
 - Warning CJS de Vite dans les tests (déprécation build CJS Node API) : non bloquant, sera corrigé en P12 avec la config ESM stricte.
 
 ---
+
+## ✅ Phase P9 — Frontend : client HTTP + hooks React Query
+
+**Date** : 2026-05-26
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `frontend/src/api/client.ts` | Wrapper fetch : `Authorization: Bearer <jwt>`, retry 401 avec `fetchAuthSession({ forceRefresh: true })`, parse JSON, lève `ApiError`, `putExternal` pour S3 pré-signé |
+| `frontend/src/api/hooks.ts` | 13 hooks query + 13 hooks mutation exactement comme § 2.9.2, query keys canoniques, invalidations onSuccess |
+| `frontend/src/api/hooks.test.tsx` | 5 tests unitaires : useRooms (2), useCreateBooking (2), useDeleteRoom (1) |
+
+### Commandes exécutées et résultats
+
+```
+$ npm run typecheck --workspace=frontend
+✅ 0 errors
+
+$ npm run test --workspace=frontend
+✅ 7 tests pass
+   hooks.test.tsx : 5 tests
+   LoginScreen.test.tsx : 2 tests
+```
+
+### Décisions / Obstacles
+
+- `beforeEach(() => vi.clearAllMocks())` retourne `VitestUtils` → conflit avec la signature `beforeEach` en mode strict. Corrigé avec la forme bloc `beforeEach(() => { vi.clearAllMocks(); })`.
+- `useDeleteMe` invalide le cache entier via `queryClient.clear()` (l'utilisateur est déconnecté, toutes les données sont obsolètes).
+- `useUploadRoomPhoto` fait deux appels : POST pour obtenir l'URL pré-signée, puis PUT direct vers S3 via `apiClient.putExternal` (sans header Authorization — auth dans les query params S3).
+- `useDeleteBooking` invalide `['rooms']` (préfixe large) car l'input est juste un `bookingId` sans `roomId`.
+- `useAdminBookings` : query key `['admin', 'bookings', filter, search]` avec `search` potentiellement `undefined` — React Query traite ce cas correctement.
+
+---
