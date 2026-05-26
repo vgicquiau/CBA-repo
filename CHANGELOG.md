@@ -124,3 +124,53 @@ $ npm run test --workspace=backend
 - `_resetRepository()` exposé pour tests unitaires des handlers (P4).
 
 ---
+
+## ✅ Phase P8 — Frontend : bootstrap Vite + Auth
+
+**Date** : 2026-05-26
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `frontend/package.json` | Dépendances pinnées : react 18.3.1, react-dom 18.3.1, @aws-amplify/auth 6.20.0, @tanstack/react-query 5.100.14, dayjs 1.11.13, vite 5.4.21, @vitejs/plugin-react 4.7.0, vitest 1.6.1, @testing-library/react 16.3.2 |
+| `frontend/tsconfig.json` | Ajout de `"types": ["vitest/globals"]` |
+| `frontend/vite.config.ts` | Plugin React, target es2020, test environment jsdom + setupFiles |
+| `frontend/index.html` | Point d'entrée HTML |
+| `frontend/src/main.tsx` | Entry-point React avec QueryClientProvider (staleTime 30s, retry 1) |
+| `frontend/src/App.tsx` | Composant racine qui monte AuthProvider |
+| `frontend/src/config.ts` | Lecteur de `/config.json` avec cache (fallback `window.CONFIG`) |
+| `frontend/src/vite-env.d.ts` | Triple-slash `/// <reference types="vite/client" />` |
+| `frontend/src/test-setup.ts` | Import `@testing-library/jest-dom` pour les matchers |
+| `frontend/src/auth/AuthProvider.tsx` | Context React `{ user, isLoading, signOut }` — charge config.json, configure Amplify, vérifie session existante |
+| `frontend/src/auth/LoginScreen.tsx` | Formulaire email/password, gère challenge `NEW_PASSWORD_REQUIRED`, affiche erreurs Cognito user-friendly |
+| `frontend/src/auth/LoginScreen.test.tsx` | 2 tests unitaires (rendu email/password/bouton, titre) |
+
+### Commandes exécutées et résultats
+
+```
+$ npm install
+✅ 135 packages ajoutés (530 audités)
+
+$ npm run typecheck --workspace=frontend
+✅ 0 errors
+
+$ npm run test --workspace=frontend
+✅ 2 tests pass
+   LoginScreen.test.tsx : 2 tests
+
+$ npm run build --workspace=frontend
+✅ dist/index.html  0.33 kB
+   dist/assets/index-DE6XT-Id.js  293.47 kB (gzip: 88.47 kB)
+   Built in 14.96s
+```
+
+### Décisions / Obstacles
+
+- React 19 et Vite 8 sont disponibles mais la spec impose React 18 → pinné à 18.3.1 / Vite 5.4.21.
+- `Amplify.configure()` importé depuis `@aws-amplify/core` (dep directe de `@aws-amplify/auth@6`) — pas besoin d'installer `aws-amplify` complet.
+- `vi.mock('@aws-amplify/auth')` dans le test pour éviter les appels réseaux Cognito en CI.
+- `App.tsx` affiche un placeholder "Connecté — routes P10" : le vrai routeur sera branché en P10.
+- Warning CJS de Vite dans les tests (déprécation build CJS Node API) : non bloquant, sera corrigé en P12 avec la config ESM stricte.
+
+---
