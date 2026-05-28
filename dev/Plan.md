@@ -27,7 +27,7 @@ Les phases P1–P9 ont été implémentées pour AWS (Lambda, DynamoDB, Cognito,
 | P7 | Script de seed | ⏳ Bloqué | — | Dépend de PM2 (Cosmos DB) avant d'être écrit |
 | P8 | Frontend : Vite + Amplify Auth (Cognito) | ✅ Terminé | c576442 | Auth AWS — à migrer (PM3) |
 | P9 | Frontend : HTTP client + hooks React Query | ✅ Terminé | 7be287c | Client HTTP agnostique ; seul getToken() à changer (PM3) |
-| P10 | Frontend : migration écrans prototype | ⏳ À faire | — | Aucun blocage Azure — démarrable maintenant |
+| P10 | Frontend : migration écrans prototype | ✅ Terminé | 75d0d45 | 6 écrans TS + router + ui/ — typecheck ✅ ; branche `feat/p10-screens` |
 | P11 | Tests E2E Playwright | ⏳ À faire | — | Bloqué par PM4 (backend Azure fonctionnel) + P10 |
 | P12 | CI/CD GitHub Actions | ↳ PM8 | — | Absorbé dans PM8 (déploiement Azure) |
 
