@@ -259,3 +259,55 @@ $ npm run test --workspace=backend -- src/data/repository.cosmos.test.ts
 - L'interface `IRepository` reste **inchangée** — les 32 handlers existants ne bougent pas.
 
 ---
+
+## ✅ Phase P10 — Frontend : migration des écrans prototype
+
+**Date** : 2026-05-28  
+**Branche** : `feat/p10-screens` → commit `75d0d45`
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `frontend/src/styles.css` | Copie verbatim du CSS prototype (576 lignes) — variables, composants, tints |
+| `frontend/src/utils.ts` | `initials`, `nightsBetween`, `fmtDate`, `fmtRange`, `todayIso` |
+| `frontend/src/ui/RoomPhoto.tsx` | `<img>` si `room.photoUrl`, sinon `<div className={tint-*}>` |
+| `frontend/src/ui/Modal.tsx` | `ConfirmDialog` — modal-backdrop + actions danger/cancel |
+| `frontend/src/ui/index.ts` | Barrel export `RoomPhoto`, `ConfirmDialog` |
+| `frontend/src/screens/HomeScreen.tsx` | Accueil — salutation, rooms vedettes, arrivées admin |
+| `frontend/src/screens/RoomsScreen.tsx` | Liste chambres avec chips filtres (tout/famille/rez/étage) |
+| `frontend/src/screens/RoomDetailScreen.tsx` | Fiche chambre + formulaire de réservation inline + écran de confirmation |
+| `frontend/src/screens/MyTripsScreen.tsx` | Séjours à venir / passés + annulation avec `ConfirmDialog` |
+| `frontend/src/screens/AdminDashboardScreen.tsx` | 4 KPIs + liste des prochaines arrivées |
+| `frontend/src/screens/AdminRoomsScreen.tsx` | CRUD chambres (list / create / edit) — tint picker, form complet, upload photo |
+| `frontend/src/App.tsx` | Routing complet : sidebar responsive + tab bar mobile + `<Routes>` |
+| `frontend/src/main.tsx` | Ajout `BrowserRouter` + `import './styles.css'` |
+| `frontend/package.json` | Ajout `react-router-dom 6.27.0` |
+
+### Architecture des écrans
+
+- **Routing** : `react-router-dom` v6, routes : `/`, `/rooms`, `/rooms/:roomId`, `/my-trips`, `/admin`, `/admin/rooms`
+- **Auth/rôle** : `useMe()` → `role === 'admin'` — aucune donnée mockée
+- **Admin guard** : `<Navigate to="/" replace />` si `!isAdmin`
+- **Sidebar** : responsive — visible ≥ 640px, rétractée ≤ 640px (tab bar mobile)
+- **Sidebar admin vs user** : deux navs distinctes, items différents, header différent
+- **Tab bar** : masquée sur `/rooms/:roomId` (page immersive) et en vue admin
+- **Toutes les données** viennent des hooks React Query de P9 — zéro import `data.jsx`
+
+### Commandes exécutées et résultats
+
+```
+$ npm run build --workspace=shared-types
+✅ 0 errors
+
+$ node_modules/.bin/tsc --noEmit -p frontend/tsconfig.json
+✅ 0 errors
+```
+
+### Décisions / Obstacles
+
+- `react-router-dom` n'était pas dans les deps frontend (P8/P9 n'en avaient pas besoin) → ajouté en `6.27.0` (compatible React 18).
+- `@clos/shared-types` doit être buildé avant le typecheck frontend (artefact dist/ référencé par le symlink workspace npm).
+- Les `implicit any` dans les lambdas des `setForm((f) => ...)` se résolvent une fois que shared-types est buildé et que TypeScript peut inférer les types de `CreateRoomInput`.
+
+---
