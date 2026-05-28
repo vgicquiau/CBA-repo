@@ -208,3 +208,54 @@ $ npm run test --workspace=frontend
 - `useAdminBookings` : query key `['admin', 'bookings', filter, search]` avec `search` potentiellement `undefined` — React Query traite ce cas correctement.
 
 ---
+
+## ✅ Phase PM2 — Data layer : Cosmos DB (implémentation Repository)
+
+**Date** : 2026-05-28  
+**Branche** : `feat/pm2-cosmos` → commit `f2aa4a9`
+
+### Fichiers créés/modifiés
+
+| Fichier | Description |
+|---|---|
+| `backend/src/data/repository.cosmos.ts` | Implémentation `IRepository` complète sur `@azure/cosmos` |
+| `backend/src/data/repository.cosmos.test.ts` | 31 tests Vitest (tous passants) |
+| `backend/package.json` | Ajout `@azure/cosmos ^4.1.0` + `@azure/identity ^4.4.0` |
+
+### Architecture retenue
+
+- **Container unique** `clos-bon-accueil-{stage}`, partition key `/pk`
+- **Conventions de clés** :
+  - Rooms → `pk = ROOM#<roomId>`, `id = ROOM#<roomId>#METADATA`
+  - Bookings → `pk = ROOM#<roomId>`, `id = BOOKING#<bookingId>`
+  - Guest refs → `pk = GUEST#<userId>`, `id = BOOKING_REF#<bookingId>` (pour `listMyBookings` efficace)
+  - Users → `pk = USER#<userId>`, `id = USER#<userId>#METADATA`
+  - HouseConfig → `pk = HOUSE_CONFIG`, `id = HOUSE_CONFIG#MAIN`
+  - Idempotency → `pk = IDEMPOTENCY`, `id = IDEMPOTENCY#<key>`, TTL 86400s
+- **Auth** : `COSMOS_KEY` en dev, `DefaultAzureCredential` (Managed Identity) en prod
+- **Concurrence optimiste** : `accessCondition: { type: 'IfMatch', condition: _etag }` sur les `replace()`
+- **Détection de conflit** : lecture de tous les bookings du `ROOM#<id>` partition + `intervalsOverlap()` côté code avant création (évite une GSI dédiée)
+- **Guest refs** : créées/supprimées en miroir de chaque Booking pour `listMyBookings` sans cross-partition query
+
+### Commandes exécutées et résultats
+
+```
+$ npm run build --workspace=shared-types
+✅ 0 errors
+
+$ node_modules/.bin/tsc --noEmit -p backend/tsconfig.json
+✅ 0 errors
+
+$ npm run test --workspace=backend -- src/data/repository.cosmos.test.ts
+✅ 31 tests pass
+   Rooms (5), Bookings (14), Users (3), HouseConfig (2), Idempotency (2),
+   getBooking (2), findBookingById (1), listAllBookings (2)
+```
+
+### Décisions / Obstacles
+
+- `ttl` : la propriété Cosmos `ttl` doit être positionnée **après** le spread du record pour ne pas être écrasée par le champ `ttl` éventuel du record source → corrigé en mettant `ttl: 86400` en dernier.
+- `mockQueryFn` distinct de `mockQuery` : le mock Vitest capturait les args de `fetchAll` (pas de `query`) — séparé en deux mocks distincts pour pouvoir asserter le `SqlQuerySpec` passé à `.query()`.
+- L'interface `IRepository` reste **inchangée** — les 32 handlers existants ne bougent pas.
+
+---
