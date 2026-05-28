@@ -38,7 +38,7 @@ Les phases P1–P9 ont été implémentées pour AWS (Lambda, DynamoDB, Cognito,
 | Phase | Intitulé | Statut | Critère "fait" |
 |---|---|---|---|
 | PM1 | IaC Bicep — scaffold et modules | ⏳ À faire | `az deployment group validate` passe pour dev et prod ; tous les modules Bicep créés |
-| PM2 | Data layer — Cosmos DB (impl Repository) | ⏳ À faire | Tests unitaires repository passent avec Cosmos DB SDK mocké ; `cdk synth` → `az deployment` équivalent |
+| PM2 | Data layer — Cosmos DB (impl Repository) | ✅ Terminé | 31 tests Vitest ✅ ; typecheck ✅ ; branche `feat/pm2-cosmos` — commit `f2aa4a9` |
 | PM3 | Auth — Entra External ID + MSAL.js | ⏳ À faire | Login frontend fonctionne avec Entra ; middleware backend valide JWT Entra ; claims `oid`/App Roles extractibles |
 | PM4 | Compute — Azure Functions (handlers + deps.ts) | ⏳ À faire | Les 32 fonctions déployées ; 27 routes API répondent correctement ; smoke tests HTTP OK |
 | PM5 | Events + Notifications — Service Bus + ACS Email | ⏳ À faire | Un événement BOOKING_CREATED publie sur Service Bus et déclenche l'envoi email via ACS |
