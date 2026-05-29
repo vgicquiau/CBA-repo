@@ -12,6 +12,9 @@ cdk.out/
 .env.*
 !.env.example
 
+# Azure Functions local config (contains connection strings — never commit)
+local.settings.json
+
 # OS
 .DS_Store
 Thumbs.db
