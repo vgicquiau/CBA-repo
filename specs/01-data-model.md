@@ -1,9 +1,12 @@
 # 01 — Modèle de données
 
 > **Source of Truth.** Ce fichier définit toutes les entités, leur projection
-> DynamoDB Single Table, les index, les contraintes d'intégrité, la couche
-> d'accès, les DTO partagés et les règles de date. Toute divergence dans le
-> code est un bug.
+> **Cosmos DB for NoSQL** (container unique, partition key `/pk`), les patterns
+> d'accès, les contraintes d'intégrité, la couche d'accès, les DTO partagés et
+> les règles de date. Toute divergence dans le code est un bug.
+>
+> **Migration** : les sections §1.2–§1.5 décrivent la cible Azure (Cosmos DB).
+> Le code AWS existant (DynamoDB) est en attente de migration PM2.
 
 ---
 
@@ -18,17 +21,17 @@ le `backend` et le `frontend` (cf. `03-infrastructure § 3.4.3`).
 // ─────────────────────────────────────────────────────────────────────────────
 // User — Utilisateur du système (famille ou ami invité par l'admin).
 // Invariants métier :
-//   - Un User est créé UNIQUEMENT par invitation Cognito (pas de signup public).
-//   - userId === Cognito sub (UUID v4 fourni par Cognito, jamais généré côté app).
-//   - role est dérivé de l'appartenance au groupe Cognito ; ne JAMAIS le stocker
+//   - Un User est créé UNIQUEMENT par invitation Entra External ID (pas de signup public).
+//   - userId === Entra External ID `oid` claim (UUID v4, jamais généré côté app).
+//   - role est dérivé des App Roles Entra dans le JWT ; ne JAMAIS le stocker
 //     comme source de vérité (le claim JWT prime).
-//   - L'unicité de email est garantie nativement par Cognito (pas par DynamoDB).
+//   - L'unicité de email est garantie nativement par Entra (pas par Cosmos DB).
 // ─────────────────────────────────────────────────────────────────────────────
 export interface User {
-  userId: string;        // Cognito sub, UUID v4
+  userId: string;        // Entra External ID oid, UUID v4
   email: string;         // unique, lowercase, validé Cognito
   displayName: string;   // prénom affiché (ex: "Claire")
-  role: 'guest' | 'admin'; // dérivé du groupe Cognito au runtime
+  role: 'guest' | 'admin'; // dérivé des App Roles Entra au runtime
   createdAt: string;     // ISO 8601 UTC, ex: "2026-05-17T14:32:00.000Z"
 }
 
@@ -57,7 +60,7 @@ export interface Room {
   pricePerPerson: number;    // €, entier ≥ 0
   photoTint: RoomPhotoTint;
   blurb: string;             // 1-2 phrases descriptives
-  photoUrl: string | null;   // CloudFront URL ou null
+  photoUrl: string | null;   // Azure CDN URL ou null
   createdAt: string;         // ISO 8601 UTC
   updatedAt: string;         // ISO 8601 UTC
 }
@@ -121,39 +124,33 @@ export interface HouseConfig {
 
 ---
 
-## 1.2 — DynamoDB Single Table Design
+## 1.2 — Cosmos DB Container Design
 
-### 1.2.1 — Table principale
+### 1.2.1 — Container principal
 
 Nom : `clos-bon-accueil-{stage}` (stage ∈ `dev`, `prod`).
-Billing : `PAY_PER_REQUEST`.
-Encryption : `AWS_MANAGED`.
-Point-in-time recovery : **activé** sur `prod`, désactivé sur `dev`.
+Base de données : `clos-bon-accueil`.
+Partition key : `/pk`.
+Throughput : **Serverless** (pay per RU — adapté au volume faible).
+Indexing policy : **automatique** — tous les chemins indexés. Pas de GSI
+à déclarer : Cosmos DB indexe nativement toutes les propriétés.
+TTL : activé au niveau container (`defaultTtl: -1` = respect de la propriété
+`ttl` par item, en secondes).
+PITR : Continuous 30 days sur `prod`, désactivé sur `dev`.
 
-| Attribut | Type | Rôle |
-|---|---|---|
-| `pk` | S | Partition key |
-| `sk` | S | Sort key |
-| `gsi1pk` | S | GSI1 partition key (sparse) |
-| `gsi1sk` | S | GSI1 sort key (sparse) |
-| `gsi2pk` | S | GSI2 partition key (sparse) |
-| `gsi2sk` | S | GSI2 sort key (sparse) |
-| `gsi3pk` | S | GSI3 partition key (sparse) |
-| `gsi3sk` | S | GSI3 sort key (sparse) |
+### 1.2.2 — Structure des items
 
-### 1.2.2 — Items projetés
-
-Pour chaque item, applique strictement les patterns ci-dessous. Stocke
-l'intégralité des champs de l'entité TypeScript en attributs DynamoDB
-top-level (pas de nested attribute). Ajoute systématiquement un attribut
-`entityType` de type string pour discriminer les items lors d'un scan.
+Chaque item possède :
+- `pk` (string) — Partition key.
+- `id` (string) — Identifiant unique au sein de la partition (remplace le sort key DynamoDB).
+- `entityType` (string) — Discriminant pour les requêtes cross-partition.
+- `_etag` (string) — Géré automatiquement par Cosmos DB (optimistic concurrency).
+- Tous les champs de l'entité TypeScript correspondante à plat (pas de nested object sauf si l'interface le définit ainsi).
 
 #### Item `Room`
 ```
 pk         = "ROOM#<roomId>"
-sk         = "META"
-gsi1pk     = "ROOMS#ALL"
-gsi1sk     = "ROOM#<roomId>"
+id         = "META"
 entityType = "Room"
 + tous les champs de l'interface Room
 ```
@@ -161,23 +158,16 @@ entityType = "Room"
 #### Item `Booking`
 ```
 pk         = "ROOM#<roomId>"
-sk         = "BOOKING#<start>#<bookingId>"
-gsi1pk     = userId ? "USER#<userId>" : null       // sparse : pas indexé si null
-gsi1sk     = userId ? "BOOKING#<start>#<bookingId>" : null
-gsi2pk     = "BOOKINGS#ALL"
-gsi2sk     = "<start>#<bookingId>"
-gsi3pk     = "BOOKING#<bookingId>"                 // lookup par ID seul
-gsi3sk     = "META"
+id         = "BOOKING#<start>#<bookingId>"
 entityType = "Booking"
 + tous les champs de l'interface Booking
 ```
+*Co-localisé avec sa Room dans la même partition → TransactionalBatch possible.*
 
 #### Item `User`
 ```
 pk         = "USER#<userId>"
-sk         = "META"
-gsi1pk     = "USERS#ALL"
-gsi1sk     = "USER#<email>"
+id         = "META"
 entityType = "User"
 + tous les champs de l'interface User
 ```
@@ -185,76 +175,65 @@ entityType = "User"
 #### Item `HouseConfig`
 ```
 pk         = "HOUSE#CONFIG"
-sk         = "META"
+id         = "META"
 entityType = "HouseConfig"
 + tous les champs de l'interface HouseConfig
 ```
 
-#### Item `IdempotencyRecord` (cf. § 1.10)
+#### Item `IdempotencyRecord` (cf. §1.10)
 ```
 pk         = "IDEMPOTENCY#<key>"
-sk         = "META"
+id         = "META"
 entityType = "IdempotencyRecord"
-+ bookingId, createdAt, ttl (epoch seconds, 24h)
+ttl        = 86400   (secondes depuis la dernière modification — expire 24h après création)
++ bookingId, createdAt
 ```
 
-### 1.2.3 — Index secondaires
-
-**GSI1** — projection `ALL`
-- pk : `gsi1pk`, sk : `gsi1sk`
-- Sert : `listMyBookings(userId)`, `listAllUsers()`, `listAllRooms()`
-
-**GSI2** — projection `ALL`
-- pk : `gsi2pk`, sk : `gsi2sk`
-- Sert : `listAllBookingsByDate()`, `listUpcomingBookings()`, dashboard admin,
-  vue calendrier semaine.
-
-**GSI3** — projection `ALL`
-- pk : `gsi3pk`, sk : `gsi3sk`
-- Sert : `findBookingById(bookingId)` — lookup direct d'un Booking par son
-  ID seul, sans connaître roomId ni start. Indispensable pour les routes
-  `PATCH /v1/bookings/{bookingId}`, `DELETE /v1/bookings/{bookingId}`,
-  `GET /v1/bookings/{bookingId}` et leurs équivalents admin.
-
-**Note explicite — Pas de GSI pour `getUserByEmail`** : l'unicité de l'email
-est enforced nativement par Cognito User Pool (`UsernameAttributes: ['email']`
-et `AutoVerifiedAttributes: ['email']`). Il n'est jamais nécessaire de
-vérifier l'unicité en DynamoDB côté Lambda. La fonction `getUserByEmail`
-n'existe pas dans le Repository.
+**Note — Pas de GSI à déclarer** : toutes les propriétés (`entityType`,
+`userId`, `bookingId`, `start`, `end`, etc.) sont auto-indexées par Cosmos DB.
+Les patterns d'accès cross-partition (ex. `listMyBookings`, `findBookingById`)
+s'expriment en SQL Cosmos DB avec un filtre sur `entityType` + la propriété
+concernée. L'unicité de l'email est garantie nativement par Entra External ID.
 
 ---
 
-## 1.3 — Mapping access patterns → opérations DynamoDB
+## 1.3 — Mapping access patterns → opérations Cosmos DB
 
-Chaque ligne ci-dessous est **la seule** opération DynamoDB autorisée pour
+Chaque ligne ci-dessous est **la seule** opération Cosmos DB autorisée pour
 l'access pattern correspondant. Toute requête qui ne match pas cette table
 doit être justifiée explicitement dans la PR.
 
-| Access pattern | Opération | Paramètres |
+SDK : `@azure/cosmos` v4. Authentification via `DefaultAzureCredential` (Managed
+Identity en production, CLI token en dev). **Jamais de clé d'accès Cosmos DB dans le code.**
+
+`container.item(id, partitionKey)` — le premier argument est `id`, le deuxième est la
+valeur du partition key.
+
+| Access pattern | Opération Cosmos DB | Notes |
 |---|---|---|
-| `getRoom(roomId)` | `GetItem` | `pk=ROOM#<id>, sk=META` |
-| `listRooms()` | `Query GSI1` | `gsi1pk=ROOMS#ALL` |
-| `createRoom(room)` | `PutItem` (`ConditionExpression: attribute_not_exists(pk)`) | unicité du roomId |
-| `updateRoom(roomId, patch)` | `UpdateItem` | `pk=ROOM#<id>, sk=META` |
-| `deleteRoom(roomId)` | `TransactWriteItems` itéré | voir § 1.4.2 (cascade) |
-| `getBooking(roomId, start, bookingId)` | `GetItem` | `pk=ROOM#<id>, sk=BOOKING#<start>#<bookingId>` |
-| `findBookingById(bookingId)` | `Query GSI3` | `gsi3pk=BOOKING#<bookingId>` (renvoie 0 ou 1 item) |
-| `listBookingsByRoom(roomId, fromDate)` | `Query` | `pk=ROOM#<id>, sk begins_with "BOOKING#"`, filter `start >= fromDate` côté Lambda |
-| `listBookingsByRoomInRange(roomId, start, end)` | `Query` | `pk=ROOM#<id>, sk BETWEEN BOOKING#<start>... AND BOOKING#<end>...`, post-filtre overlap exact en Lambda |
-| `listMyBookings(userId)` | `Query GSI1` | `gsi1pk=USER#<userId>`, ScanIndexForward=false |
-| `listAllBookings(fromDate?, toDate?)` | `Query GSI2` | `gsi2pk=BOOKINGS#ALL`, `gsi2sk BETWEEN <fromDate> AND <toDate>` |
-| `listUpcomingBookings(today)` | `Query GSI2` | `gsi2pk=BOOKINGS#ALL, gsi2sk >= <today>` |
-| `searchBookings(text)` | `Query GSI2` + filter côté Lambda | filter sur `name` contains (volume <2000) |
-| `createBooking(b)` | pré-Query + `TransactWriteItems` | voir § 1.4.1 |
-| `updateBooking(b)` | pré-Query + `TransactWriteItems` (delete+put si start change) | voir § 1.4.1 et § 1.4.4 |
-| `deleteBooking(roomId, start, bookingId)` | `DeleteItem` | — |
-| `getUser(userId)` | `GetItem` | `pk=USER#<id>, sk=META` |
-| `listUsers()` | `Query GSI1` | `gsi1pk=USERS#ALL` |
-| `createUser(user)` | `PutItem` (`ConditionExpression: attribute_not_exists(pk)`) | idempotent |
-| `getHouseConfig()` | `GetItem` | `pk=HOUSE#CONFIG, sk=META` |
-| `updateHouseConfig(patch)` | `UpdateItem` | `pk=HOUSE#CONFIG, sk=META` |
-| `getIdempotencyRecord(key)` | `GetItem` | `pk=IDEMPOTENCY#<key>, sk=META` |
-| `putIdempotencyRecord(record)` | `PutItem` (`ConditionExpression: attribute_not_exists(pk)`) | TTL 24h |
+| `getRoom(roomId)` | `container.item('META', 'ROOM#roomId').read()` | Point read — 1 RU |
+| `listRooms()` | `SELECT * FROM c WHERE c.entityType = 'Room' AND c.id = 'META'` | Cross-partition, auto-indexé |
+| `createRoom(room)` | `container.items.create(item)` | 409 Conflict si pk+id existe |
+| `updateRoom(roomId, patch)` | `container.item('META', 'ROOM#roomId').replace(merged, { accessCondition: { type: 'IfMatch', condition: etag } })` | ETag obligatoire |
+| `deleteRoom(roomId)` | `TransactionalBatch` itéré | voir §1.4.2 (cascade) |
+| `getBooking(roomId, start, bookingId)` | `container.item('BOOKING#start#bookingId', 'ROOM#roomId').read()` | Point read |
+| `findBookingById(bookingId)` | `SELECT * FROM c WHERE c.entityType = 'Booking' AND c.bookingId = @bookingId` | Cross-partition, auto-indexé sur `bookingId` |
+| `listBookingsByRoom(roomId, fromDate)` | `SELECT * FROM c WHERE c.pk = 'ROOM#roomId' AND c.entityType = 'Booking' AND c.start >= @from` | In-partition |
+| `listBookingsByRoomInRange(roomId, start, end)` | `SELECT * FROM c WHERE c.pk = 'ROOM#roomId' AND c.entityType = 'Booking' AND c.start < @end AND c.end > @start` | In-partition, overlap exact |
+| `listMyBookings(userId)` | `SELECT * FROM c WHERE c.entityType = 'Booking' AND c.userId = @userId ORDER BY c.start DESC` | Cross-partition, auto-indexé sur `userId` |
+| `listAllBookings(fromDate?, toDate?)` | `SELECT * FROM c WHERE c.entityType = 'Booking' AND c.start >= @from AND c.start <= @to` | Cross-partition |
+| `listUpcomingBookings(today)` | `SELECT * FROM c WHERE c.entityType = 'Booking' AND c.start >= @today` | Cross-partition |
+| `searchBookings(text)` | `SELECT * FROM c WHERE c.entityType = 'Booking' AND CONTAINS(c.name, @text, true)` | Cross-partition, `true` = case-insensitive |
+| `createBooking(b)` | pré-query + `TransactionalBatch` | voir §1.4.1 |
+| `updateBooking(b)` | pré-query + `TransactionalBatch` | voir §1.4.4 |
+| `deleteBooking(roomId, start, bookingId)` | `container.item('BOOKING#start#bookingId', 'ROOM#roomId').delete()` | — |
+| `getUser(userId)` | `container.item('META', 'USER#userId').read()` | Point read |
+| `listUsers()` | `SELECT * FROM c WHERE c.entityType = 'User' AND c.id = 'META'` | Cross-partition |
+| `createUser(user)` | `container.items.create(item)` | 409 si userId existe déjà |
+| `getHouseConfig()` | `container.item('META', 'HOUSE#CONFIG').read()` | Point read singleton |
+| `updateHouseConfig(patch)` | `container.item('META', 'HOUSE#CONFIG').replace(merged)` | — |
+| `getIdempotencyRecord(key)` | `container.item('META', 'IDEMPOTENCY#key').read()` | Point read |
+| `putIdempotencyRecord(record)` | `container.items.create({ ...record, ttl: 86400 })` | Auto-expire 24h |
 
 ---
 
@@ -272,47 +251,43 @@ doit être justifiée explicitement dans la PR.
 4. Récupère également la Room pour valider `capacity >= people` ; sinon
    → `ValidationError`.
 
-**Phase 2 — Écriture (TransactWriteItems)** :
+**Phase 2 — Écriture (TransactionalBatch — même partition `ROOM#roomId`)** :
+
 La transaction contient **deux opérations** :
-1. **`ConditionCheck`** sur la Room :
-   - `pk=ROOM#<roomId>, sk=META`
-   - `ConditionExpression: attribute_exists(pk) AND capacity >= :people`
-   - Garantit que la Room n'a pas été supprimée ni que sa capacité n'a
-     pas été réduite entre la Phase 1 et la Phase 2.
-2. **`Put`** du Booking avec
-   `ConditionExpression: attribute_not_exists(pk) AND attribute_not_exists(sk)`
-   pour garantir qu'aucun item identique n'existe déjà.
+1. **Replace Room** avec `accessCondition: { type: 'IfMatch', condition: roomETag }` :
+   - Même contenu Room (no-op sémantique, juste pour vérifier que la Room n'a
+     pas été modifiée ou supprimée entre Phase 1 et Phase 2).
+   - Équivaut au `ConditionCheck` DynamoDB.
+2. **Create Booking** : `batch.create(bookingItem)` — échoue avec 409 si
+   l'item `BOOKING#start#bookingId` existe déjà.
 
-**Pas de mécanisme de `version` / optimistic locking sur la Room.** La
-fenêtre de race condition entre Phase 1 et Phase 2 est acceptée car :
-- Volume très faible (audit § F-9 : 1 admin + quelques guests, ~quelques
-  réservations par mois).
-- Conséquence d'un double-booking accidentel = email à l'admin via le
-  job de réconciliation (voir ci-dessous).
+Si la Room a changé entre Phase 1 et Phase 2 (ETag mismatch) : le batch
+échoue avec 412 Precondition Failed → relancer (retry une fois) ou renvoyer 409.
 
-**Job de réconciliation nocturne** : crée une Lambda
-`reconciliation-job.ts` déclenchée par EventBridge tous les jours à
-03:00 Europe/Paris. Elle scan toutes les Bookings futures (Query GSI2
-`gsi2sk >= today`) groupées par `roomId`, détecte les chevauchements et
-publie un événement `BOOKING_CONFLICT_DETECTED` sur SNS pour notifier
-l'admin par email. Aucun fix automatique — décision humaine.
+**Job de réconciliation nocturne** : Azure Function `reconciliation-job.ts`
+déclenchée par Timer Trigger NCRONTAB `0 0 1 * * *` (01:00:00 UTC). Elle
+requête toutes les Bookings futures (`listUpcomingBookings`) groupées par
+`roomId`, détecte les chevauchements et publie un événement
+`BOOKING_CONFLICT_DETECTED` sur Service Bus pour notifier l'admin par ACS Email.
+Aucun fix automatique — décision humaine.
 
 ### 1.4.2 — Suppression de Room : cascade
 
 `deleteRoom(roomId)` s'exécute en plusieurs étapes :
 
-1. `Query` toutes les `Booking` de la room (`pk=ROOM#<roomId>, sk begins_with "BOOKING#"`).
+1. Query in-partition `listBookingsByRoom(roomId)` → toutes les Bookings de la room.
 2. Construis une liste d'événements `BOOKING_CANCELLED` à émettre (un par
    booking, avec `userId` du propriétaire, `reason: "ROOM_DELETED"`).
-3. `TransactWriteItems` (chunks de 100 max — limite DynamoDB) supprimant :
-   la `Room` (`sk=META`) et toutes les `Booking` associées.
+3. `TransactionalBatch` (même partition `ROOM#roomId`, 100 opérations max) supprimant :
+   la Room (`id=META`) et toutes les Bookings associées.
+   Si le nombre de bookings > 99 (limite : 100 ops par batch Cosmos DB), itère par
+   chunks et logge un warning.
 4. Pour chaque booking supprimé avec `userId !== null`, publie un message
-   sur le topic SNS `clos-notifications-{stage}` avec payload :
+   sur le **Service Bus topic** `clos-notifications-{stage}` avec payload :
    `{type: "BOOKING_CANCELLED", bookingId, userId, roomName, start, end, reason: "ROOM_DELETED"}`.
-   Une Lambda `notification-dispatcher` consomme et envoie l'email SES.
+   L'Azure Function `notification-dispatcher` consomme le topic et envoie l'email ACS.
 
-Si le nombre de bookings > 100, itère par chunks et logge un warning. La
-cascade est **idempotente** : réexécuter la suppression sur une Room déjà
+La cascade est **idempotente** : réexécuter la suppression sur une Room déjà
 absente renvoie `NotFoundError` (404), pas 500.
 
 ### 1.4.3 — Modification de Room avec capacité réduite
@@ -339,15 +314,13 @@ il faut donc `Delete` de l'ancien item + `Put` du nouveau.
    Pour changer de chambre, annuler et recréer (cf. UX prototype).
 3. Pré-validation overlap (Phase 1 de § 1.4.1) en **excluant** le bookingId
    courant du calcul.
-4. **Si `start` est inchangé** : `TransactWriteItems` avec :
-   - `ConditionCheck` Room (capacity).
-   - `Update` du Booking (champs non-clé uniquement).
-5. **Si `start` change** : `TransactWriteItems` avec :
-   - `ConditionCheck` Room (capacity).
-   - `Delete` de l'ancien item (`pk=ROOM#<roomId>, sk=BOOKING#<oldStart>#<bookingId>`)
-     avec `ConditionExpression: attribute_exists(pk)`.
-   - `Put` du nouvel item (`sk=BOOKING#<newStart>#<bookingId>`) avec tous
-     les attributs et nouveaux `gsi*sk` recalculés.
+4. **Si `start` est inchangé** : `TransactionalBatch` (même partition `ROOM#roomId`) :
+   - Replace Room avec `ifMatch: roomETag` (ConditionCheck capacity).
+   - Replace Booking avec les champs mis à jour (même `id`, `ifMatch: bookingETag`).
+5. **Si `start` change** : `TransactionalBatch` (même partition `ROOM#roomId`) :
+   - Replace Room avec `ifMatch: roomETag` (ConditionCheck capacity).
+   - Delete l'ancien item (`id=BOOKING#oldStart#bookingId`).
+   - Create le nouvel item (`id=BOOKING#newStart#bookingId`) avec tous les champs mis à jour.
 
 Cette règle s'applique identiquement aux routes user et admin.
 
@@ -356,19 +329,22 @@ Cette règle s'applique identiquement aux routes user et admin.
 ## 1.5 — Couche d'accès (Data Access Layer)
 
 Crée le fichier `backend/src/data/repository.ts` exportant **exactement** les
-fonctions ci-dessous. Toute Lambda doit passer par ce repository — **interdit**
-d'utiliser le `DynamoDBDocumentClient` directement dans le code handler.
+éléments ci-dessous. Toute Azure Function doit passer par ce repository —
+**interdit** d'utiliser le `@azure/cosmos` SDK directement dans le code handler.
+
+L'**interface** `Repository` est cloud-agnostique. Seule l'implémentation
+(`repository.cosmos.ts`, créée en PM2) dépend du SDK Cosmos DB.
 
 ```typescript
 // backend/src/data/repository.ts
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { CosmosClient } from '@azure/cosmos';
 import { Room, Booking, User, HouseConfig } from '@clos/shared-types';
 
 export interface IdempotencyRecord {
   key: string;
   bookingId: string;
   createdAt: string;
-  ttl: number;  // epoch seconds
+  ttl: number;  // secondes depuis la création (Cosmos DB ttl property)
 }
 
 export interface Repository {
@@ -405,10 +381,14 @@ export interface Repository {
   putIdempotencyRecord(record: IdempotencyRecord): Promise<void>;
 }
 
-export function createRepository(
-  ddb: DynamoDBDocumentClient,
-  tableName: string,
-): Repository;
+// Factory Cosmos DB — implémentation réelle dans repository.cosmos.ts (PM2)
+export interface CosmosRepositoryOptions {
+  client: CosmosClient;
+  databaseId: string;
+  containerId: string;
+}
+
+export function createRepository(options: CosmosRepositoryOptions): Repository;
 
 // Erreurs métier typées — JAMAIS de Error nue
 export class ConflictError extends Error {
@@ -430,13 +410,13 @@ export class ForbiddenError extends Error {
 
 **Règles d'implémentation impératives** :
 - Toutes les fonctions sont `async` et retournent des `Promise`.
-- Tout `null` DynamoDB est traduit en `null` TypeScript explicite (jamais `undefined`).
+- Tout item non trouvé Cosmos DB (`404 NotFound`) est traduit en `null` TypeScript
+  explicite (jamais `undefined`).
 - Aucune fonction ne logge — c'est le handler appelant qui logue.
 - Les erreurs métier lèvent les classes ci-dessus (jamais des Error nues).
-- Les erreurs techniques DynamoDB (`ConditionalCheckFailedException`,
-  `TransactionCanceledException`, etc.) remontent telles quelles ; le
-  mapping vers HTTP se fait dans `withErrorHandling`
-  (cf. `02-api-contract § 2.5`).
+- Les erreurs Cosmos DB (409 Conflict, 412 PreconditionFailed, 429 TooManyRequests,
+  etc.) remontent telles quelles depuis l'implémentation ; le mapping vers HTTP
+  se fait dans `withErrorHandling` (cf. `specs/02-api-contract.md §2.5`).
 
 ---
 
@@ -450,8 +430,8 @@ export class ForbiddenError extends Error {
 | HouseConfig | 1 | 1 |
 | IdempotencyRecord | éphémère (TTL 24h) | ≤ 50 en permanence |
 
-Le mode `PAY_PER_REQUEST` reste largement sous le seuil de coût significatif
-(<5 € / mois). Pas d'auto-scaling à configurer.
+Le mode **Serverless** Cosmos DB reste largement sous le seuil de coût significatif
+(< 0,50 € / mois). Pas de throughput à provisionner.
 
 ---
 
@@ -584,8 +564,11 @@ Crée la fonction `generateBookingReference(): string` dans
 `backend/src/shared/identifiers.ts`.
 
 ### 1.9.3 — `userId`
-**Jamais généré par l'app.** Toujours égal au `sub` Cognito (UUID v4)
-récupéré dans `event.requestContext.authorizer.claims.sub`.
+**Jamais généré par l'app.** Toujours égal au claim `oid` Entra External ID
+(UUID v4) extrait du JWT après validation APIM. En post-PM4, récupéré via le
+header `x-user-id` injecté par APIM (`request.headers.get('x-user-id')`).
+
+**Migration** : remplace `event.requestContext.authorizer.claims.sub` (Cognito).
 
 ---
 
@@ -601,11 +584,12 @@ Booking) acceptent un header optionnel `Idempotency-Key: <uuid>`.
   2. Si trouvé : `findBookingById(record.bookingId)` et renvoie le Booking
      existant avec code 200 (au lieu de 201).
   3. Si non trouvé : exécute la création normalement, puis
-     `putIdempotencyRecord({key, bookingId, createdAt, ttl: now + 86400})`.
-     TTL DynamoDB activé sur l'attribut `ttl` (epoch seconds).
+     `putIdempotencyRecord({key, bookingId, createdAt, ttl: 86400})`.
 
-**Activation du TTL DynamoDB** : dans `infra/lib/data-stack.ts`, configure
-la table avec `timeToLiveAttribute: 'ttl'`.
+**TTL Cosmos DB** : la propriété `ttl` sur l'item `IdempotencyRecord` est en
+**secondes** (durée de vie depuis la dernière modification). Configurer le
+container avec `defaultTtl: -1` pour activer le TTL opt-in par item.
+Bicep : `resource container 'containers@2024-02-15-preview' { properties: { resource: { defaultTtl: -1 } } }`.
 
 ---
 
