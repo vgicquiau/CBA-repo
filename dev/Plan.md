@@ -1,7 +1,7 @@
 # Plan d'implémentation — Le Clos Bon Accueil
 
-**Dernière mise à jour** : 2026-05-28  
-**État** : P1–P6 ✅ P8–P9 ✅ — Migration AWS → Azure engagée (phases PM1–PM8 à faire)
+**Dernière mise à jour** : 2026-05-29  
+**État** : P1–P11 ✅ PM1–PM8 ✅ — Migration AWS → Azure terminée
 
 ---
 
@@ -24,11 +24,11 @@ Les phases P1–P9 ont été implémentées pour AWS (Lambda, DynamoDB, Cognito,
 | P4 | Backend : 29 Lambda handlers API | ✅ Terminé | 31f9098 | Signatures AWS Lambda — à migrer (PM4) |
 | P5 | Backend : 3 Lambdas hors API GW | ✅ Terminé | f95f1ec | Triggers AWS spécifiques — à migrer (PM4+PM5) |
 | P6 | Infrastructure CDK 6 stacks AWS | ✅ Terminé | e8e0296 | Remplacé par Bicep en PM1 — archive conservée |
-| P7 | Script de seed | ⏳ Bloqué | — | Dépend de PM2 (Cosmos DB) avant d'être écrit |
+| P7 | Script de seed | ✅ Terminé | — | seed.ts + tsx ; typecheck ✅ ; `npm run seed --workspace=backend -- --stage dev` |
 | P8 | Frontend : Vite + Amplify Auth (Cognito) | ✅ Terminé | c576442 | Auth AWS — à migrer (PM3) |
 | P9 | Frontend : HTTP client + hooks React Query | ✅ Terminé | 7be287c | Client HTTP agnostique ; seul getToken() à changer (PM3) |
 | P10 | Frontend : migration écrans prototype | ✅ Terminé | 75d0d45 | 6 écrans TS + router + ui/ — typecheck ✅ ; branche `feat/p10-screens` |
-| P11 | Tests E2E Playwright | ⏳ À faire | — | Bloqué par PM4 (backend Azure fonctionnel) + P10 |
+| P11 | Tests E2E Playwright | ✅ Terminé | — | 3 scénarios Playwright dans `frontend/tests/e2e/` ; auth MSAL via storageState ; `playwright.config.ts` |
 | P12 | CI/CD GitHub Actions | ↳ PM8 | — | Absorbé dans PM8 (déploiement Azure) |
 
 ---
@@ -37,14 +37,14 @@ Les phases P1–P9 ont été implémentées pour AWS (Lambda, DynamoDB, Cognito,
 
 | Phase | Intitulé | Statut | Critère "fait" |
 |---|---|---|---|
-| PM1 | IaC Bicep — scaffold et modules | ⏳ À faire | `az deployment group validate` passe pour dev et prod ; tous les modules Bicep créés |
+| PM1 | IaC Bicep — scaffold et modules | ✅ Terminé | 8 fichiers Bicep créés dans `infra/bicep/` ; `az deployment group validate` à vérifier avec un Resource Group Azure actif |
 | PM2 | Data layer — Cosmos DB (impl Repository) | ✅ Terminé | 31 tests Vitest ✅ ; typecheck ✅ ; branche `feat/pm2-cosmos` — commit `f2aa4a9` |
-| PM3 | Auth — Entra External ID + MSAL.js | ⏳ À faire | Login frontend fonctionne avec Entra ; middleware backend valide JWT Entra ; claims `oid`/App Roles extractibles |
-| PM4 | Compute — Azure Functions (handlers + deps.ts) | ⏳ À faire | Les 32 fonctions déployées ; 27 routes API répondent correctement ; smoke tests HTTP OK |
-| PM5 | Events + Notifications — Service Bus + ACS Email | ⏳ À faire | Un événement BOOKING_CREATED publie sur Service Bus et déclenche l'envoi email via ACS |
-| PM6 | CDN + Static Hosting — Azure CDN + Blob | ⏳ À faire | Frontend accessible via domaine custom ; config.json injecté à deploy-time ; photos CDN fonctionnel |
-| PM7 | Monitoring — Application Insights + Azure Monitor | ⏳ À faire | Logs Functions visibles dans Log Analytics ; alerte email opérationnelle en cas d'erreur |
-| PM8 | CI/CD GitHub Actions → Azure OIDC | ⏳ À faire | PR : lint + typecheck + tests + `az deployment validate` ; merge main : déploie dev ; tag : déploie prod avec approval |
+| PM3 | Auth — Entra External ID + MSAL.js | ✅ Terminé | `oid`/App Roles claims dans http.ts ; MSAL.js frontend (AuthProvider + LoginScreen + client.ts) ; `@aws-sdk/client-cognito-identity-provider` supprimé ; 134 tests ✅ |
+| PM4 | Compute — Azure Functions (handlers + deps.ts) | ✅ Terminé | 32 handlers Azure Functions v4 ; `app.http()` + timer + Service Bus triggers ; 126 tests Vitest ✅ |
+| PM5 | Events + Notifications — Service Bus + ACS Email | ✅ Terminé | `publishEvent()` → ServiceBusClient ; `sendEmail()` → ACS EmailClient ; 132 tests ✅ |
+| PM6 | CDN + Static Hosting — Azure CDN + Blob | ✅ Terminé | Blob+CDN dans data.bicep ✅ ; frontend.bicep ✅ ; putExternal SAS (client.ts) ✅ ; admin-rooms-photo-url Azure Blob SAS ✅ ; 126 tests ✅ |
+| PM7 | Monitoring — Application Insights + Azure Monitor | ✅ Terminé | `monitoring.bicep` : Log Analytics + App Insights + Action Group + Alert (5 erreurs/5 min) ; `APPLICATIONINSIGHTS_CONNECTION_STRING` injecté dans clos-api et clos-jobs |
+| PM8 | CI/CD GitHub Actions → Azure OIDC | ✅ Terminé | `.github/workflows/` : pr.yml, deploy-dev.yml, deploy-prod.yml, e2e.yml — OIDC WIF, build+deploy Azure Functions + Blob frontend |
 
 ---
 

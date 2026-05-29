@@ -5,6 +5,9 @@
 > Région principale : **`francecentral`** (Paris). Aucune contrainte de région
 > secondaire — Azure CDN et APIM gèrent les certificats TLS automatiquement.
 > Décisions D1–D6 : `docs/migration-azure/02-mapping-services.md`.
+>
+> **Dernière mise à jour** : 2026-05-29  
+> **État d'implémentation** : PM1–PM7 ✅ terminés · PM8 CI/CD ⏳ seule phase restante
 
 ---
 
@@ -32,14 +35,15 @@ clos-bon-accueil/
 │   └── scripts/
 │       └── seed.ts
 ├── infra/
-│   ├── bicep/             # ← cible Azure (PM1)
+│   ├── bicep/             # ← cible Azure (PM1–PM7)
 │   │   ├── main.bicep
 │   │   ├── modules/
 │   │   │   ├── data.bicep
 │   │   │   ├── auth.bicep
 │   │   │   ├── notifications.bicep
 │   │   │   ├── api.bicep
-│   │   │   └── frontend.bicep
+│   │   │   ├── frontend.bicep
+│   │   │   └── monitoring.bicep
 │   │   └── parameters/
 │   │       ├── dev.bicepparam
 │   │       └── prod.bicepparam
@@ -59,7 +63,7 @@ clos-bon-accueil/
 
 ## 3.2 — Modules Bicep
 
-L'orchestrateur `infra/bicep/main.bicep` déploie **5 modules** dans l'ordre
+L'orchestrateur `infra/bicep/main.bicep` déploie **6 modules** dans l'ordre
 décrit au §3.11. Chaque module équivaut à une stack CDK.
 
 ### 3.2.1 — Découplage strict entre modules (anti-cycle)
@@ -170,9 +174,6 @@ Ressources :
     `STAGE`, `LOG_LEVEL`, `SERVICEBUS_FQDN`, `SERVICEBUS_TOPIC`,
     + Key Vault references pour `ACS_CONNECTION_STRING`, `ACS_FROM_ADDRESS`,
     `ADMIN_EMAIL`.
-- **Azure Monitor Alert** → Action Group email admin (`admin-email` KV secret)
-  pour les alertes ops (remplace SNS alarms topic).
-
 Écrit dans App Configuration : `notifications-servicebus-fqdn`, `notifications-topic-name`.
 
 ### 3.2.5 — `api.bicep`
@@ -224,6 +225,26 @@ Ressources :
   - Généré à deploy-time en lisant les clés App Configuration.
   - Uploadé dans `$web/config.json` via `az storage blob upload`.
   - Le frontend le lit au démarrage (`fetch('/config.json')`).
+
+### 3.2.7 — `monitoring.bicep`
+
+Ressources :
+- **Log Analytics workspace** `clos-logs-{stage}` :
+  - Rétention : `logRetentionDays` (7j dev, 30j prod).
+  - Source commune pour Application Insights et les diagnostic settings APIM.
+- **Application Insights** `clos-appinsights-{stage}` :
+  - Workspace-based (lié à `clos-logs-{stage}`).
+  - `APPLICATIONINSIGHTS_CONNECTION_STRING` injecté dans les App Settings de `clos-api` et `clos-jobs`.
+  - Sampling : `appInsightsSamplingPercentage` (10% dev, 100% prod).
+  - Collecte automatique : requests, dependencies, exceptions, traces.
+- **Action Group** `clos-alerts-{stage}` :
+  - Notification email vers `admin-email` (secret Key Vault).
+- **Azure Monitor Metric Alerts** (toutes notifient le groupe ci-dessus) :
+  - Function errors > 5 sur 5 min — par Function App (`clos-api`, `clos-jobs`).
+  - APIM 5XX response rate > 1% sur 10 min.
+  - Cosmos DB server-side errors > 0 sur 5 min.
+  - Metric custom `BookingConflict` > 20 sur 1 jour.
+  - Metric custom `ReconciliationConflictsDetected` > 0 (n'importe quelle exécution).
 
 ---
 
@@ -375,7 +396,7 @@ Toutes les Azure Functions loggent en **JSON structuré** via le SDK
 est l'alternative OpenTelemetry-native.
 
 ```typescript
-// backend/src/api/logger.ts — post-PM4
+// backend/src/api/logger.ts
 import appInsights from 'applicationinsights';
 
 appInsights.setup(process.env.APPLICATIONINSIGHTS_CONNECTION_STRING)
@@ -407,8 +428,7 @@ Application Insights. Métriques à émettre (inchangées par rapport aux specs)
 
 ### 3.6.3 — Alertes Azure Monitor
 
-Dans `notifications.bicep`, configure les **Azure Monitor Metric Alerts**
-(remplace les alarmes CloudWatch + SNS alarms topic) — toutes notifient
+Dans `monitoring.bicep`, les **Azure Monitor Metric Alerts** notifient
 l'Action Group email `clos-alerts-{stage}` (adresse = `admin-email` KV secret) :
 
 - Function errors (exceptions) > 5 sur 5 min — par Function App.
@@ -416,6 +436,8 @@ l'Action Group email `clos-alerts-{stage}` (adresse = `admin-email` KV secret) :
 - Cosmos DB server-side errors > 0 sur 5 min.
 - Metric `BookingConflict` > 20 sur 1 jour (anomalie business).
 - Metric `ReconciliationConflictsDetected` > 0 (n'importe quelle exécution).
+
+Voir §3.2.7 pour le détail complet des ressources `monitoring.bicep`.
 
 ### 3.6.4 — Distributed tracing
 
@@ -488,6 +510,10 @@ Obligations fonctionnelles (inchangées — cf. `specs/02-api-contract.md §2.4`
 ---
 
 ## 3.8 — Pipeline CI/CD
+
+> **État** : ⏳ **PM8 — seule phase restante.** Les workflows décrits ci-dessous
+> sont à créer dans `.github/workflows/`. L'infrastructure Azure (PM1–PM7) est
+> déployable manuellement en attendant.
 
 ### 3.8.1 — `ci.yml` (déclenché sur PR)
 
@@ -621,36 +647,37 @@ par Service Bus si un second consumer est ajouté.
 15. Idem `auth.bicep`.
 16. Idem `notifications.bicep`.
 17. Idem `api.bicep` (crée APIM + Function App `clos-api` vide).
-18. Build frontend : `npm run build --workspace=frontend`.
-19. `az storage blob upload-batch --destination '$web' ...`
-20. Idem `frontend.bicep` (CDN + `config.json`).
+18. Idem `monitoring.bicep` (Log Analytics + App Insights + alertes).
+19. Build frontend : `npm run build --workspace=frontend`.
+20. `az storage blob upload-batch --destination '$web' ...`
+21. Idem `frontend.bicep` (CDN + `config.json`).
 
 ### Phase 2 — Seed et premier utilisateur
 
-21. `npm run seed --workspace=backend -- --stage dev` :
+22. `npm run seed --workspace=backend -- --stage dev` :
     - Crée le `HouseConfig` singleton.
     - Crée les 12 Rooms.
     - Crée les 13 Bookings mock (dev uniquement).
-22. **Premier admin** : Portail Entra External ID → « Inviter un utilisateur »
+23. **Premier admin** : Portail Entra External ID → « Inviter un utilisateur »
     → assigner App Role `admin`.
-23. Vérifier le `auth-trigger` : le Function `auth-trigger` doit créer l'item
+24. Vérifier le `auth-trigger` : le Function `auth-trigger` doit créer l'item
     `User` dans Cosmos DB au premier login.
-24. Premier login sur `https://dev.clos-bon-accueil.fr/` via MSAL redirect.
+25. Premier login sur `https://dev.clos-bon-accueil.fr/` via MSAL redirect.
 
 ### Phase 3 — Smoke tests
 
-25. Login → home s'affiche.
-26. `useRooms()` → 12 chambres.
-27. Créer un booking bout en bout (tunnel 4 étapes).
-28. Mode admin → dashboard charge.
-29. Supprimer une chambre → cascade + email ACS envoyé.
+26. Login → home s'affiche.
+27. `useRooms()` → 12 chambres.
+28. Créer un booking bout en bout (tunnel 4 étapes).
+29. Mode admin → dashboard charge.
+30. Supprimer une chambre → cascade + email ACS envoyé.
 
 ### Phase 4 — Déploiement prod
 
-30. Répéter phases 1-3 avec `--parameters prod.bicepparam`.
-31. Seed prod : `npm run seed --workspace=backend -- --stage prod` (pas de mock bookings).
-32. Premier merge `main` → vérifier `deploy-dev.yml`.
-33. Premier tag `v0.1.0` → vérifier `deploy-prod.yml` (approbation manuelle).
+31. Répéter phases 1-3 avec `--parameters prod.bicepparam`.
+32. Seed prod : `npm run seed --workspace=backend -- --stage prod` (pas de mock bookings).
+33. Premier merge `main` → vérifier `deploy-dev.yml`.
+34. Premier tag `v0.1.0` → vérifier `deploy-prod.yml` (approbation manuelle).
 
 ---
 
@@ -750,6 +777,7 @@ graph LR
   notif["notifications.bicep\nService Bus topic\nACS Email\nclos-jobs Functions"]
   api["api.bicep\nAPIM + WAF\nFunction App clos-api\nDNS records"]
   frontend["frontend.bicep\nBlob $web\nAzure CDN SPA\nconfig.json injection"]
+  monitoring["monitoring.bicep\nLog Analytics\nApplication Insights\nAzure Monitor Alerts"]
 
   data -- "App Config:\ncosmos-*, cdn-photos-*" --> auth
   data -- "App Config:\ncosmos-*, storage-*" --> notif
@@ -758,6 +786,8 @@ graph LR
   auth -- "App Config:\ntenant-id" --> frontend
   notif -- "App Config:\nservicebus-fqdn, topic-name" --> api
   api -- "App Config:\napi-url" --> frontend
+  monitoring -. "APPLICATIONINSIGHTS_CONNECTION_STRING\ninjecté dans app settings" .-> api
+  monitoring -. "APPLICATIONINSIGHTS_CONNECTION_STRING\ninjecté dans app settings" .-> notif
 ```
 
 ### 3.A.3 — Flux d'une requête HTTP (création de booking)
