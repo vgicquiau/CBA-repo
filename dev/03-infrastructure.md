@@ -1,6 +1,22 @@
-# 03 — Infrastructure & déploiement
+# 03 — Infrastructure & déploiement (AWS — ARCHIVE)
 
-> **Source of Truth.** Ce fichier définit l'intégralité de l'infrastructure
+> **⚠️ ARCHIVE — CIBLE REMPLACÉE.** Ce fichier décrit l'infrastructure AWS
+> d'origine (CDK v2, Lambda, DynamoDB, Cognito, CloudFront…). La cible
+> d'infrastructure a basculé sur **Azure** le 2026-05-28.
+>
+> **→ Source of Truth infrastructure actuelle :
+> [`docs/migration-azure/03-infrastructure-azure.md`](../docs/migration-azure/03-infrastructure-azure.md)**
+>
+> Ce fichier est conservé comme référence de migration pour les phases PM1–PM8.
+> Ne pas écrire de nouveau code AWS basé sur ce fichier.
+
+---
+
+*Contenu original (AWS) conservé ci-dessous pour référence de migration.*
+
+---
+
+> **[ORIGINAL]** Ce fichier définit l'intégralité de l'infrastructure
 > AWS, son organisation CDK, le pipeline CI/CD, les paramètres
 > opérationnels et le plan de bring-up. Aucune ressource AWS n'est créée
 > hors CDK (à l'exception du domaine et de la hosted zone Route 53, qui
