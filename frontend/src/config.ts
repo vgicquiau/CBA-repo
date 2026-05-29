@@ -1,8 +1,7 @@
 export interface AppConfig {
   apiBaseUrl: string;
-  userPoolId: string;
-  userPoolClientId: string;
-  region: string;
+  tenantId: string;
+  clientId: string;
   cdnDomain: string;
   stage: string;
 }

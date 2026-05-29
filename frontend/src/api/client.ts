@@ -1,12 +1,28 @@
-import { fetchAuthSession } from '@aws-amplify/auth';
+import { InteractionRequiredAuthError } from '@azure/msal-browser';
 import { ApiError } from '@clos/shared-types';
 import { getConfig } from '../config';
+import { getMsalInstance } from '../auth/msalInstance';
 
 async function getToken(forceRefresh = false): Promise<string> {
-  const session = await fetchAuthSession({ forceRefresh });
-  const token = session.tokens?.idToken?.toString();
-  if (!token) throw new ApiError(401, 'UNAUTHORIZED', 'Session expirée');
-  return token;
+  const instance = getMsalInstance();
+  const accounts = instance.getAllAccounts();
+  if (!accounts.length) throw new ApiError(401, 'UNAUTHORIZED', 'Session expirée');
+
+  const { clientId } = getConfig();
+  try {
+    const result = await instance.acquireTokenSilent({
+      scopes: [`api://${clientId}/access_as_user`],
+      account: accounts[0],
+      forceRefresh,
+    });
+    return result.accessToken;
+  } catch (err) {
+    if (err instanceof InteractionRequiredAuthError) {
+      // Silent acquisition failed — force interactive login on next user action
+      throw new ApiError(401, 'UNAUTHORIZED', 'Session expirée');
+    }
+    throw err;
+  }
 }
 
 async function toApiError(response: Response): Promise<ApiError> {
@@ -63,7 +79,7 @@ export const apiClient = {
     request<T>('POST', path, { body, extraHeaders }),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, { body }),
   delete: <T>(path: string) => request<T>('DELETE', path),
-  // Upload direct vers S3 via URL pré-signée (sans header Authorization)
+  // Upload direct vers Azure Blob via SAS token URL (sans header Authorization)
   putExternal: (url: string, file: File) =>
     fetch(url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file }),
 };

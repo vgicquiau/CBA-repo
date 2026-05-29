@@ -1,4 +1,4 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { z } from 'zod';
 import { withErrorHandling, getPathParam, parseQuery, ok } from '../api/http';
 import { getRepository } from '../api/deps';
@@ -10,9 +10,9 @@ const QuerySchema = z.object({
   end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  const roomId = getPathParam(event, 'roomId');
-  const { start, end } = parseQuery(event, QuerySchema);
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  const roomId = getPathParam(request, 'roomId');
+  const { start, end } = parseQuery(request, QuerySchema);
   if (start >= end) throw new ValidationError('end', 'must be after start');
   const repo = getRepository();
   const room = await repo.getRoom(roomId);
@@ -20,6 +20,13 @@ const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
   const bookings = await repo.listBookingsByRoomInRange(roomId, start, end);
   const conflicts = bookings.filter((b) => intervalsOverlap(start, end, b.start, b.end));
   return ok({ roomId, start, end, available: conflicts.length === 0, conflicts });
-};
+}
+
+app.http('room-availability', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'rooms/{roomId}/availability',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

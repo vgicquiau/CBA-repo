@@ -1,4 +1,4 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { z } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
 import { withErrorHandling, getCurrentUserId, parseBody, created as createdResponse } from '../api/http';
@@ -16,13 +16,12 @@ const BodySchema = z.object({
   notes: z.string().default(''),
 });
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  const userId = getCurrentUserId(event);
-  const body = parseBody(event, BodySchema);
-  const idempotencyKey = event.headers?.['idempotency-key'];
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  const userId = getCurrentUserId(request);
+  const body = await parseBody(request, BodySchema);
+  const idempotencyKey = request.headers.get('idempotency-key');
   const repo = getRepository();
 
-  // Idempotency check
   if (idempotencyKey) {
     const existing = await repo.getIdempotencyRecord(idempotencyKey);
     if (existing) {
@@ -65,6 +64,13 @@ const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
 
   await publishEvent({ type: 'BOOKING_CREATED', bookingId, userId, roomId: body.roomId, start: body.start, end: body.end });
   return createdResponse(result);
-};
+}
+
+app.http('bookings-create', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'bookings',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

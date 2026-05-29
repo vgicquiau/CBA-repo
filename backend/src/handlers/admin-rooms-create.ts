@@ -1,4 +1,4 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { z } from 'zod';
 import { withErrorHandling, requireRole, parseBody, created as createdResponse } from '../api/http';
 import { getRepository } from '../api/deps';
@@ -21,14 +21,21 @@ const BodySchema = z.object({
   blurb: z.string().default(''),
 });
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  requireRole(event, 'admin');
-  const body = parseBody(event, BodySchema);
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  requireRole(request, 'admin');
+  const body = await parseBody(request, BodySchema);
   const now = new Date().toISOString();
   const room: Room = { ...body, photoUrl: null, createdAt: now, updatedAt: now };
   const result = await getRepository().createRoom(room);
   logger.info('Room created', { roomId: body.roomId });
   return createdResponse(result);
-};
+}
+
+app.http('admin-rooms-create', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'admin/rooms',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

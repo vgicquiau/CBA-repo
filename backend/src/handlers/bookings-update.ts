@@ -1,4 +1,4 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { z } from 'zod';
 import { withErrorHandling, getCurrentUserId, requireOwnership, getPathParam, parseBody, ok } from '../api/http';
 import { getRepository, publishEvent } from '../api/deps';
@@ -12,10 +12,10 @@ const BodySchema = z.object({
   notes: z.string().optional(),
 });
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  const userId = getCurrentUserId(event);
-  const bookingId = getPathParam(event, 'bookingId');
-  const body = parseBody(event, BodySchema);
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  const userId = getCurrentUserId(request);
+  const bookingId = getPathParam(request, 'bookingId');
+  const body = await parseBody(request, BodySchema);
   const repo = getRepository();
   const existing = await repo.findBookingById(bookingId);
   if (!existing) throw new NotFoundError('Booking', bookingId);
@@ -24,6 +24,13 @@ const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
   logger.info('Booking updated', { bookingId, userId });
   await publishEvent({ type: 'BOOKING_UPDATED', bookingId, userId, roomId: existing.roomId, changes: body });
   return ok(updated);
-};
+}
+
+app.http('bookings-update', {
+  methods: ['PATCH'],
+  authLevel: 'anonymous',
+  route: 'bookings/{bookingId}',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

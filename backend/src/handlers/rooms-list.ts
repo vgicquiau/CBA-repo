@@ -1,11 +1,17 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { withErrorHandling, ok } from '../api/http';
 import { getRepository } from '../api/deps';
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async () => {
-  const repo = getRepository();
-  const rooms = await repo.listRooms();
+async function rawHandler(_request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  const rooms = await getRepository().listRooms();
   return ok({ rooms });
-};
+}
+
+app.http('rooms-list', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'rooms',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

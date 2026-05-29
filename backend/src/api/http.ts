@@ -1,9 +1,4 @@
-import type {
-  APIGatewayProxyResultV2,
-  APIGatewayProxyStructuredResultV2,
-  APIGatewayProxyEventV2WithJWTAuthorizer,
-  Handler,
-} from 'aws-lambda';
+import type { HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { ZodError } from 'zod';
 import type { z } from 'zod';
 import type { Booking } from '@clos/shared-types';
@@ -15,80 +10,75 @@ import {
   ForbiddenError,
 } from '../data/repository';
 
-// ─── CORS ────────────────────────────────────────────────────────────────────
+// ─── Response helpers ──────────────────────────────────────────────────────────
+// CORS is handled by APIM — no CORS headers needed on Function responses.
 
-export const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': process.env.CORS_ORIGIN ?? '*',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization,Idempotency-Key',
-  'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-};
-
-// ─── Réponses 2xx ────────────────────────────────────────────────────────────
-
-export function ok<T>(body: T): APIGatewayProxyStructuredResultV2 {
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify(body),
-  };
+export function ok<T>(body: T): HttpResponseInit {
+  return { status: 200, jsonBody: body };
 }
 
-export function created<T>(body: T): APIGatewayProxyStructuredResultV2 {
-  return {
-    statusCode: 201,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify(body),
-  };
+export function created<T>(body: T): HttpResponseInit {
+  return { status: 201, jsonBody: body };
 }
 
-export function noContent(): APIGatewayProxyStructuredResultV2 {
-  return {
-    statusCode: 204,
-    headers: CORS_HEADERS,
-    body: '',
-  };
+export function noContent(): HttpResponseInit {
+  return { status: 204 };
 }
-
-// ─── Réponses d'erreur ───────────────────────────────────────────────────────
 
 export function errorResponse(
   status: number,
   code: string,
   message: string,
   details?: unknown,
-): APIGatewayProxyStructuredResultV2 {
+): HttpResponseInit {
   return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-    body: JSON.stringify({
-      error: { code, message, ...(details !== undefined ? { details } : {}) },
-    }),
+    status,
+    jsonBody: { error: { code, message, ...(details !== undefined ? { details } : {}) } },
   };
 }
 
-// ─── Auth ─────────────────────────────────────────────────────────────────────
+// ─── JWT decode ────────────────────────────────────────────────────────────────
+// APIM validates the JWT and forwards it via X-Forwarded-User header.
+// We decode (not verify) to extract claims — trust is established by APIM.
 
-export function getCurrentUserId(event: APIGatewayProxyEventV2WithJWTAuthorizer): string {
-  const sub = event.requestContext.authorizer?.jwt?.claims?.['sub'];
-  if (!sub || typeof sub !== 'string') {
-    throw new ForbiddenError('Missing user identity');
+function decodeJwtPayload(token: string): Record<string, unknown> {
+  const parts = token.split('.');
+  if (parts.length < 2) throw new ForbiddenError('Invalid token format');
+  try {
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as Record<string, unknown>;
+  } catch {
+    throw new ForbiddenError('Cannot decode token');
   }
-  return sub;
 }
 
-export function getCurrentUserGroups(event: APIGatewayProxyEventV2WithJWTAuthorizer): string[] {
-  const groups = event.requestContext.authorizer?.jwt?.claims?.['cognito:groups'];
-  if (!groups) return [];
-  if (typeof groups === 'string') return groups.split(',');
-  if (Array.isArray(groups)) return groups as string[];
+// ─── Auth ──────────────────────────────────────────────────────────────────────
+
+export function getCurrentUserId(request: HttpRequest): string {
+  const token = request.headers.get('x-forwarded-user');
+  if (!token) throw new ForbiddenError('Missing user identity');
+  const claims = decodeJwtPayload(token);
+  const oid = claims['oid'];
+  if (!oid || typeof oid !== 'string') throw new ForbiddenError('Missing oid claim');
+  return oid;
+}
+
+export function getCurrentUserGroups(request: HttpRequest): string[] {
+  const token = request.headers.get('x-forwarded-user');
+  if (!token) return [];
+  try {
+    const claims = decodeJwtPayload(token);
+    const roles = claims['roles'];
+    if (!roles) return [];
+    if (Array.isArray(roles)) return roles as string[];
+    if (typeof roles === 'string') return roles.split(' ');
+  } catch {
+    // fall through
+  }
   return [];
 }
 
-export function requireRole(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
-  role: 'admin' | 'guest',
-): void {
-  const groups = getCurrentUserGroups(event);
+export function requireRole(request: HttpRequest, role: 'admin' | 'guest'): void {
+  const groups = getCurrentUserGroups(request);
   if (!groups.includes(role)) {
     throw new ForbiddenError(`Role '${role}' required`);
   }
@@ -100,15 +90,15 @@ export function requireOwnership(booking: Booking, userId: string): void {
   }
 }
 
-// ─── Parsing ──────────────────────────────────────────────────────────────────
+// ─── Parsing ───────────────────────────────────────────────────────────────────
 
-export function parseBody<T extends z.ZodType>(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
+export async function parseBody<T extends z.ZodType>(
+  request: HttpRequest,
   schema: T,
-): z.infer<T> {
+): Promise<z.infer<T>> {
   let raw: unknown;
   try {
-    raw = event.body ? JSON.parse(event.body) : {};
+    raw = await request.json();
   } catch {
     throw new ValidationError('body', 'Invalid JSON');
   }
@@ -116,31 +106,35 @@ export function parseBody<T extends z.ZodType>(
 }
 
 export function parseQuery<T extends z.ZodType>(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
+  request: HttpRequest,
   schema: T,
 ): z.infer<T> {
-  return schema.parse(event.queryStringParameters ?? {});
+  const params: Record<string, string> = {};
+  request.query.forEach((value, key) => { params[key] = value; });
+  return schema.parse(params);
 }
 
-export function getPathParam(
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
-  name: string,
-): string {
-  const value = event.pathParameters?.[name];
+export function getPathParam(request: HttpRequest, name: string): string {
+  const value = request.params[name];
   if (!value) {
     throw new ValidationError(name, `Path parameter '${name}' is required`);
   }
   return value;
 }
 
-// ─── withErrorHandling ────────────────────────────────────────────────────────
+// ─── Handler type ──────────────────────────────────────────────────────────────
 
-type AnyHandler = Handler<APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyResultV2>;
+export type AzureHttpHandler = (
+  request: HttpRequest,
+  context: InvocationContext,
+) => Promise<HttpResponseInit>;
 
-export function withErrorHandling(h: AnyHandler): AnyHandler {
-  return async (event, context, callback) => {
+// ─── withErrorHandling ─────────────────────────────────────────────────────────
+
+export function withErrorHandling(h: AzureHttpHandler): AzureHttpHandler {
+  return async (request, context) => {
     try {
-      return await (h as (e: typeof event, c: typeof context, cb: typeof callback) => Promise<APIGatewayProxyStructuredResultV2>)(event, context, callback);
+      return await h(request, context);
     } catch (err) {
       if (err instanceof ZodError) {
         return errorResponse(400, 'VALIDATION_FAILED', 'Validation failed', err.flatten());
@@ -160,7 +154,6 @@ export function withErrorHandling(h: AnyHandler): AnyHandler {
       if (err instanceof CapacityReductionError) {
         return errorResponse(422, 'CAPACITY_REDUCTION_BLOCKED', err.message, { blockingBookings: err.blockingBookings });
       }
-      // DynamoDB errors by name
       if (err instanceof Error) {
         if (err.name === 'ConditionalCheckFailedException') {
           return errorResponse(409, 'BOOKING_CONFLICT', 'Precondition failed', { reason: 'PRECONDITION_FAILED' });
@@ -168,11 +161,7 @@ export function withErrorHandling(h: AnyHandler): AnyHandler {
         if (err.name === 'TransactionCanceledException') {
           return errorResponse(409, 'BOOKING_CONFLICT', 'Transaction cancelled', { reason: 'TRANSACTION_CANCELLED' });
         }
-        if (err.name === 'UsernameExistsException') {
-          return errorResponse(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists');
-        }
       }
-      // Fallback — never expose raw message in production
       console.error('[withErrorHandling] Unhandled error:', err);
       return errorResponse(500, 'INTERNAL_ERROR', 'An internal error occurred');
     }

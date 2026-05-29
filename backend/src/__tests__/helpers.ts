@@ -1,16 +1,81 @@
 import { vi } from 'vitest';
-import type { APIGatewayProxyEventV2WithJWTAuthorizer, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-
-export type HandlerResult = APIGatewayProxyStructuredResultV2;
-
-export async function callHandler(
-  handler: (event: APIGatewayProxyEventV2WithJWTAuthorizer, ctx: unknown, cb: unknown) => Promise<unknown>,
-  event: APIGatewayProxyEventV2WithJWTAuthorizer,
-): Promise<HandlerResult> {
-  return (await handler(event, {}, () => {})) as HandlerResult;
-}
+import { HttpRequest, InvocationContext } from '@azure/functions';
+import type { HttpResponseInit } from '@azure/functions';
 import type { Repository } from '../data/repository';
 import type { Room, Booking, User, HouseConfig } from '@clos/shared-types';
+
+export type HandlerResult = HttpResponseInit;
+
+// ─── JWT helpers ──────────────────────────────────────────────────────────────
+
+function makeJwt(claims: Record<string, unknown>): string {
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  return `fakeheader.${payload}.fakesig`;
+}
+
+// ─── Request factory ──────────────────────────────────────────────────────────
+
+export function makeRequest(
+  overrides: {
+    method?: string;
+    url?: string;
+    headers?: Record<string, string>;
+    params?: Record<string, string>;
+    query?: Record<string, string>;
+    body?: string | null;
+  } = {},
+  authOverrides: { oid?: string; roles?: string[] } = {},
+): HttpRequest {
+  const oid = authOverrides.oid ?? 'user-123';
+  const roles = authOverrides.roles ?? ['guest'];
+  const jwt = makeJwt({ oid, roles, email: 'claire@example.com' });
+
+  return new HttpRequest({
+    method: overrides.method ?? (overrides.body != null ? 'POST' : 'GET'),
+    url: overrides.url ?? 'https://localhost/v1/test',
+    headers: {
+      'x-forwarded-user': jwt,
+      ...(overrides.headers ?? {}),
+    },
+    params: overrides.params ?? {},
+    query: overrides.query ?? {},
+    body: overrides.body != null ? { string: overrides.body } : undefined,
+  });
+}
+
+export function makeAdminRequest(
+  overrides: Parameters<typeof makeRequest>[0] = {},
+): HttpRequest {
+  return makeRequest(overrides, { oid: 'admin-123', roles: ['admin'] });
+}
+
+// Backward-compat aliases: group3-4.test.ts and group5-7.test.ts pass
+// { pathParameters, body } in the old AWS Lambda event shape.
+type LegacyOpts = {
+  pathParameters?: Record<string, string>;
+  body?: string | null;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+};
+export function makeEvent(opts: LegacyOpts = {}): HttpRequest {
+  return makeRequest({ params: opts.pathParameters, body: opts.body, query: opts.query, headers: opts.headers });
+}
+export function makeAdminEvent(opts: LegacyOpts = {}): HttpRequest {
+  return makeAdminRequest({ params: opts.pathParameters, body: opts.body, query: opts.query, headers: opts.headers });
+}
+
+export function makeContext(): InvocationContext {
+  return new InvocationContext({ functionName: 'test' });
+}
+
+export async function callHandler(
+  handler: (request: HttpRequest, context: InvocationContext) => Promise<HttpResponseInit>,
+  request: HttpRequest,
+): Promise<HandlerResult> {
+  return handler(request, makeContext());
+}
+
+// ─── Mock data ────────────────────────────────────────────────────────────────
 
 export const mockRoom: Room = {
   roomId: 'glycine', name: 'La Glycine', wing: 'Aile gauche', floor: 1,
@@ -70,47 +135,4 @@ export function makeRepo(overrides: Partial<Repository> = {}): Repository {
     putIdempotencyRecord: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-}
-
-export function makeEvent(
-  overrides: Partial<APIGatewayProxyEventV2WithJWTAuthorizer> = {},
-  authOverrides: { sub?: string; groups?: string } = {},
-): APIGatewayProxyEventV2WithJWTAuthorizer {
-  const sub = authOverrides.sub ?? 'user-123';
-  const groups = authOverrides.groups ?? 'guest';
-  return {
-    version: '2.0',
-    routeKey: 'GET /test',
-    rawPath: '/v1/test',
-    rawQueryString: '',
-    headers: {},
-    isBase64Encoded: false,
-    requestContext: {
-      accountId: '123',
-      apiId: 'abc',
-      domainName: 'test',
-      domainPrefix: 'test',
-      http: { method: 'GET', path: '/v1/test', protocol: 'HTTP/1.1', sourceIp: '1.2.3.4', userAgent: 'test' },
-      requestId: 'req-1',
-      routeKey: 'GET /test',
-      stage: 'dev',
-      time: '',
-      timeEpoch: 0,
-      authorizer: {
-        jwt: {
-          claims: { sub, 'cognito:groups': groups, email: 'claire@example.com' },
-          scopes: [],
-        },
-        principalId: sub,
-        integrationLatency: 0,
-      },
-    },
-    ...overrides,
-  } as APIGatewayProxyEventV2WithJWTAuthorizer;
-}
-
-export function makeAdminEvent(
-  overrides: Partial<APIGatewayProxyEventV2WithJWTAuthorizer> = {},
-): APIGatewayProxyEventV2WithJWTAuthorizer {
-  return makeEvent(overrides, { sub: 'admin-123', groups: 'admin' });
 }

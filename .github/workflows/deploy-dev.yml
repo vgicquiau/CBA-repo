@@ -1,0 +1,135 @@
+name: Deploy Dev
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared-types
+        run: npm run build --workspace=shared-types
+
+      - name: Build backend
+        run: npm run build --workspace=backend
+
+      - name: Build frontend
+        run: npm run build --workspace=frontend
+
+      - name: Package backend for deployment
+        # zip without -y so symlinks (workspace packages) are followed and included as real files
+        run: cd backend && zip -r $GITHUB_WORKSPACE/backend-deploy.zip dist/ node_modules/ host.json package.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            frontend/dist
+            backend-deploy.zip
+          retention-days: 1
+
+  deploy:
+    name: Deploy to Dev
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+      url: https://dev.clos-bon-accueil.fr
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep infrastructure
+        run: |
+          az deployment group create \
+            --resource-group rg-clos-bon-accueil-dev \
+            --template-file infra/bicep/main.bicep \
+            --parameters infra/bicep/parameters/dev.bicepparam \
+            --parameters tenantId='${{ secrets.ENTRA_TENANT_ID }}' \
+                         clientId='${{ secrets.ENTRA_CLIENT_ID }}' \
+                         adminEmail='${{ secrets.ADMIN_EMAIL_DEV }}'
+
+      - name: Deploy clos-api Functions
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group rg-clos-bon-accueil-dev \
+            --name clos-api-dev \
+            --src backend-deploy.zip
+
+      - name: Deploy clos-jobs Functions
+        run: |
+          az functionapp deployment source config-zip \
+            --resource-group rg-clos-bon-accueil-dev \
+            --name clos-jobs-dev \
+            --src backend-deploy.zip
+
+      - name: Upload frontend to Blob Storage
+        run: |
+          az storage blob upload-batch \
+            --destination '$web' \
+            --account-name closstoragedev \
+            --source frontend/dist \
+            --overwrite \
+            --auth-mode login
+
+      - name: Inject config.json
+        env:
+          ENTRA_TENANT_ID: ${{ secrets.ENTRA_TENANT_ID }}
+          ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+        run: |
+          jq -n \
+            --arg apiBaseUrl "https://api.dev.clos-bon-accueil.fr/v1" \
+            --arg tenantId "$ENTRA_TENANT_ID" \
+            --arg clientId "$ENTRA_CLIENT_ID" \
+            --arg cdnDomain "cdn.dev.clos-bon-accueil.fr" \
+            --arg stage "dev" \
+            '{apiBaseUrl: $apiBaseUrl, tenantId: $tenantId, clientId: $clientId, cdnDomain: $cdnDomain, stage: $stage}' \
+            > /tmp/config.json
+          az storage blob upload \
+            --container-name '$web' \
+            --account-name closstoragedev \
+            --name config.json \
+            --file /tmp/config.json \
+            --overwrite \
+            --auth-mode login
+
+      - name: Purge CDN cache
+        run: |
+          az cdn endpoint purge \
+            --resource-group rg-clos-bon-accueil-dev \
+            --profile-name clos-cdn-dev \
+            --name clos-cdn-web-dev \
+            --content-paths '/*'
+
+  e2e:
+    name: E2E Tests
+    needs: deploy
+    uses: ./.github/workflows/e2e.yml
+    with:
+      base-url: 'https://dev.clos-bon-accueil.fr'
+    secrets: inherit

@@ -12,6 +12,9 @@ cdk.out/
 .env.*
 !.env.example
 
+# Azure Functions local config (contains connection strings — never commit)
+local.settings.json
+
 # OS
 .DS_Store
 Thumbs.db
@@ -32,3 +35,6 @@ cdk.context.json
 # Playwright
 test-results/
 playwright-report/
+
+# Claude Code runtime artifacts
+.claude/worktrees/
