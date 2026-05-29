@@ -1,0 +1,45 @@
+name: E2E Tests
+
+on:
+  workflow_call:
+    inputs:
+      base-url:
+        description: 'Base URL of the deployed app (e.g. https://dev.clos-bon-accueil.fr)'
+        type: string
+        required: true
+
+jobs:
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Run E2E tests
+        run: npm run test:e2e --workspace=frontend
+        env:
+          CI: 'true'
+          E2E_BASE_URL: ${{ inputs.base-url }}
+          E2E_GUEST_EMAIL: ${{ secrets.E2E_GUEST_EMAIL }}
+          E2E_GUEST_PASSWORD: ${{ secrets.E2E_GUEST_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: frontend/playwright-report/
+          retention-days: 7
