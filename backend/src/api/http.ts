@@ -146,7 +146,7 @@ export function withErrorHandling(h: AzureHttpHandler): AzureHttpHandler {
         return errorResponse(403, 'FORBIDDEN', err.message, { reason: err.reason });
       }
       if (err instanceof NotFoundError) {
-        return errorResponse(404, 'NOT_FOUND', err.message, { entity: err.entity, id: err.id });
+        return errorResponse(404, 'NOT_FOUND', 'Resource not found');
       }
       if (err instanceof ConflictError) {
         return errorResponse(409, 'BOOKING_CONFLICT', err.message, { conflicts: err.conflictingBookings });

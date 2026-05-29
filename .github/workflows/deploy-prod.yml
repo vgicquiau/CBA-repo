@@ -133,4 +133,8 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     with:
       base-url: 'https://www.clos-bon-accueil.fr'
-    secrets: inherit
+    secrets:
+      E2E_GUEST_EMAIL:    ${{ secrets.E2E_GUEST_EMAIL }}
+      E2E_GUEST_PASSWORD: ${{ secrets.E2E_GUEST_PASSWORD }}
+      E2E_ADMIN_EMAIL:    ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}

@@ -30,6 +30,7 @@ async function rawHandler(request: HttpRequest, _context: InvocationContext): Pr
       permissions: BlobSASPermissions.from({ write: true }),
       startsOn,
       expiresOn,
+      contentType: 'image/jpeg',
     },
     delegationKey,
     accountName,

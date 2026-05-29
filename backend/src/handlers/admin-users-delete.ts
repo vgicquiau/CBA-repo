@@ -11,9 +11,10 @@ async function rawHandler(request: HttpRequest, _context: InvocationContext): Pr
   const user = await repo.getUser(userId);
   if (!user) throw new NotFoundError('User', userId);
 
-  // TODO PM4: delete user from Entra External ID via Microsoft Graph API
+  await repo.deleteUser(userId);
+  // TODO PM4: also delete from Entra External ID via Microsoft Graph API
 
-  logger.info('User deleted', { userId, email: user.email });
+  logger.info('User deleted from Cosmos DB', { userId, email: user.email });
   return ok({ deletedUserId: userId });
 }
 

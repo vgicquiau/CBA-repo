@@ -60,7 +60,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview
     }
     enableAutomaticFailover: false
     enableMultipleWriteLocations: false
-    disableLocalAuth: false
+    disableLocalAuth: true
     backupPolicy: enablePointInTimeRecovery ? {
       type: 'Continuous'
       continuousModeProperties: {
@@ -330,6 +330,56 @@ resource cdnEndpointWeb 'Microsoft.Cdn/profiles/endpoints@2023-05-01' = {
                 sourcePattern: '/'
                 destination: '/index.html'
                 preserveUnmatchedPath: false
+              }
+            }
+          ]
+        }
+        {
+          // Security headers injected on all SPA responses.
+          // NOTE: Content-Security-Policy is set post-deployment via CLI (single quotes
+          //   cannot be embedded in Bicep string literals without parser errors):
+          //   az cdn endpoint rule add --rule-name ContentSecurityPolicy \
+          //     --action-name ModifyResponseHeader --header-action Overwrite \
+          //     --header-name Content-Security-Policy \
+          //     --header-value "default-src 'self'; script-src 'self'; ..."
+          name: 'SecurityHeaders'
+          order: 3
+          conditions: []
+          actions: [
+            {
+              name: 'ModifyResponseHeader'
+              parameters: {
+                typeName: 'DeliveryRuleHeaderActionParameters'
+                headerAction: 'Overwrite'
+                headerName: 'X-Content-Type-Options'
+                value: 'nosniff'
+              }
+            }
+            {
+              name: 'ModifyResponseHeader'
+              parameters: {
+                typeName: 'DeliveryRuleHeaderActionParameters'
+                headerAction: 'Overwrite'
+                headerName: 'X-Frame-Options'
+                value: 'DENY'
+              }
+            }
+            {
+              name: 'ModifyResponseHeader'
+              parameters: {
+                typeName: 'DeliveryRuleHeaderActionParameters'
+                headerAction: 'Overwrite'
+                headerName: 'Strict-Transport-Security'
+                value: 'max-age=31536000; includeSubDomains'
+              }
+            }
+            {
+              name: 'ModifyResponseHeader'
+              parameters: {
+                typeName: 'DeliveryRuleHeaderActionParameters'
+                headerAction: 'Overwrite'
+                headerName: 'Referrer-Policy'
+                value: 'strict-origin-when-cross-origin'
               }
             }
           ]

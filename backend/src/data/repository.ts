@@ -1,4 +1,3 @@
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { Room, Booking, User, HouseConfig } from '@clos/shared-types';
 
 export interface IdempotencyRecord {
@@ -32,6 +31,7 @@ export interface Repository {
   getUser(userId: string): Promise<User | null>;
   listUsers(): Promise<User[]>;
   createUser(user: User): Promise<User>;
+  deleteUser(userId: string): Promise<void>;
 
   // House config
   getHouseConfig(): Promise<HouseConfig>;
@@ -76,39 +76,4 @@ export class ForbiddenError extends Error {
     super(reason);
     this.name = 'ForbiddenError';
   }
-}
-
-// Stub factory — implémentation DynamoDB réelle à ajouter en P3+
-export function createRepository(
-  _ddb: DynamoDBDocumentClient,
-  _tableName: string,
-): Repository {
-  return {
-    async getRoom(_roomId) { return null; },
-    async listRooms() { return []; },
-    async createRoom(room) { return room; },
-    async updateRoom(_roomId, _patch) { throw new NotFoundError('Room', _roomId); },
-    async deleteRoom(_roomId) { return { cancelledBookings: [] }; },
-
-    async getBooking(_roomId, _start, _bookingId) { return null; },
-    async findBookingById(_bookingId) { return null; },
-    async listBookingsByRoom(_roomId, _fromDate) { return []; },
-    async listBookingsByRoomInRange(_roomId, _start, _end) { return []; },
-    async listMyBookings(_userId) { return []; },
-    async listAllBookings(_opts) { return []; },
-    async searchBookings(_text) { return []; },
-    async createBooking(booking) { return booking; },
-    async updateBooking(booking) { return booking; },
-    async deleteBooking(_roomId, _start, _bookingId) { return; },
-
-    async getUser(_userId) { return null; },
-    async listUsers() { return []; },
-    async createUser(user) { return user; },
-
-    async getHouseConfig() { throw new NotFoundError('HouseConfig', 'singleton'); },
-    async updateHouseConfig(_patch) { throw new NotFoundError('HouseConfig', 'singleton'); },
-
-    async getIdempotencyRecord(_key) { return null; },
-    async putIdempotencyRecord(_record) { return; },
-  };
 }

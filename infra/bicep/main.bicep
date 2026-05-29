@@ -135,6 +135,7 @@ module notifications 'modules/notifications.bicep' = {
     keyVaultUri: keyVault.properties.vaultUri
     cosmosAccountName: data.outputs.cosmosAccountName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    entraClientId: clientId
   }
   dependsOn: [data, auth]
 }
@@ -159,6 +160,16 @@ module api 'modules/api.bicep' = {
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
   dependsOn: [data, auth, notifications]
+}
+
+module waf 'modules/waf.bicep' = {
+  name: 'waf'
+  params: {
+    stage: stage
+    apimGatewayUrl: api.outputs.apiGatewayUrl
+    appConfigName: appConfig.name
+  }
+  dependsOn: [api]
 }
 
 module frontend 'modules/frontend.bicep' = {

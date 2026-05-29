@@ -53,10 +53,8 @@ function datesOverlap(s1: string, e1: string, s2: string, e2: string): boolean {
 // ─── Client factory ───────────────────────────────────────────────────────────
 
 function buildClient(): CosmosClient {
-  const endpoint = process.env.COSMOS_ENDPOINT ?? 'https://localhost:8081';
-  if (process.env.COSMOS_KEY) {
-    return new CosmosClient({ endpoint, key: process.env.COSMOS_KEY });
-  }
+  const endpoint = process.env.COSMOS_ENDPOINT;
+  if (!endpoint) throw new Error('COSMOS_ENDPOINT environment variable is required');
   return new CosmosClient({ endpoint, aadCredentials: new DefaultAzureCredential() });
 }
 
@@ -344,6 +342,26 @@ export function createCosmosRepository(): Repository {
       };
       await container.items.create(doc);
       return user;
+    },
+
+    async deleteUser(userId: string): Promise<void> {
+      const existing = await readItem<UserDoc>(docId.user(userId), pk.user(userId));
+      if (!existing) throw new NotFoundError('User', userId);
+      const bookingRefs = await queryItems<BookingRefDoc>(
+        { query: 'SELECT * FROM c WHERE c.entityType = "BookingRef"' },
+        pk.guest(userId),
+      );
+      await Promise.all(
+        bookingRefs.map((ref) =>
+          container.item(docId.booking(ref.bookingId), pk.room(ref.roomId)).delete().catch(() => {}),
+        ),
+      );
+      await Promise.all(
+        bookingRefs.map((ref) =>
+          container.item(docId.bookingRef(ref.bookingId), pk.guest(userId)).delete().catch(() => {}),
+        ),
+      );
+      await container.item(docId.user(userId), pk.user(userId)).delete();
     },
 
     // ── HouseConfig ────────────────────────────────────────────────────────────

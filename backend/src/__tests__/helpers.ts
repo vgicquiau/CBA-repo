@@ -129,6 +129,7 @@ export function makeRepo(overrides: Partial<Repository> = {}): Repository {
     getUser: vi.fn().mockResolvedValue(mockUser),
     listUsers: vi.fn().mockResolvedValue([mockUser]),
     createUser: vi.fn().mockResolvedValue(mockUser),
+    deleteUser: vi.fn().mockResolvedValue(undefined),
     getHouseConfig: vi.fn().mockResolvedValue(mockHouseConfig),
     updateHouseConfig: vi.fn().mockResolvedValue(mockHouseConfig),
     getIdempotencyRecord: vi.fn().mockResolvedValue(null),
