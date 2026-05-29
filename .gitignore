@@ -35,3 +35,6 @@ cdk.context.json
 # Playwright
 test-results/
 playwright-report/
+
+# Claude Code runtime artifacts
+.claude/worktrees/
