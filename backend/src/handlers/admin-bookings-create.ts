@@ -1,4 +1,4 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { z } from 'zod';
 import { v7 as uuidv7 } from 'uuid';
 import { withErrorHandling, requireRole, getCurrentUserId, parseBody, created as createdResponse } from '../api/http';
@@ -17,10 +17,10 @@ const BodySchema = z.object({
   userId: z.string().nullable().default(null),
 });
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  requireRole(event, 'admin');
-  const adminId = getCurrentUserId(event);
-  const body = parseBody(event, BodySchema);
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  requireRole(request, 'admin');
+  const adminId = getCurrentUserId(request);
+  const body = await parseBody(request, BodySchema);
   const now = new Date().toISOString();
   const bookingId = uuidv7();
   const booking: Booking = {
@@ -41,6 +41,13 @@ const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
   logger.info('Admin created booking', { bookingId, adminId });
   await publishEvent({ type: 'BOOKING_CREATED', bookingId, userId: body.userId, roomId: body.roomId, start: body.start, end: body.end });
   return createdResponse(result);
-};
+}
+
+app.http('admin-bookings-create', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'admin/bookings',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

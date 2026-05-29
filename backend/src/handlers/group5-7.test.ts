@@ -1,21 +1,26 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { makeEvent, makeAdminEvent, makeRepo, mockHouseConfig, callHandler } from '../__tests__/helpers';
+import { makeRequest, makeAdminRequest, makeRepo, mockHouseConfig, callHandler } from '../__tests__/helpers';
 
 vi.mock('../api/deps', () => ({
   getRepository: vi.fn(),
-  getCognitoClient: vi.fn().mockReturnValue({
-    send: vi.fn().mockResolvedValue({ User: { Attributes: [{ Name: 'sub', Value: 'new-sub-123' }] } }),
+  getBlobServiceClient: vi.fn().mockReturnValue({
+    url: 'https://closstoragedev.blob.core.windows.net/',
+    getUserDelegationKey: vi.fn().mockResolvedValue({ value: 'mock-key' }),
   }),
-  getS3Client: vi.fn().mockReturnValue({}),
-  getSnsClient: vi.fn(),
   publishEvent: vi.fn().mockResolvedValue(undefined),
   _resetRepository: vi.fn(),
   _resetClients: vi.fn(),
 }));
 
-vi.mock('@aws-sdk/s3-request-presigner', () => ({
-  getSignedUrl: vi.fn().mockResolvedValue('https://s3.example.com/presigned?sig=abc'),
-}));
+vi.mock('@azure/storage-blob', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@azure/storage-blob')>();
+  return {
+    ...actual,
+    generateBlobSASQueryParameters: vi.fn().mockReturnValue({
+      toString: () => 'sig=mocksig&se=2026-01-01',
+    }),
+  };
+});
 
 import { getRepository } from '../api/deps';
 
@@ -28,15 +33,16 @@ beforeEach(() => {
 describe('POST /v1/admin/rooms', () => {
   it('returns 201 with created room', async () => {
     const { handler } = await import('./admin-rooms-create');
-    const event = makeAdminEvent({
+    const req = makeAdminRequest({
+      method: 'POST',
       body: JSON.stringify({
         roomId: 'nouvelle', name: 'La Nouvelle', wing: 'Aile gauche',
         floor: 0, area: 15, capacity: 2, beds: '1 lit double',
         equipment: [], linen: [], pricePerPerson: 25, photoTint: 'lin', blurb: '',
       }),
     });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(201);
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(201);
   });
 });
 
@@ -44,23 +50,25 @@ describe('POST /v1/admin/rooms', () => {
 describe('PATCH /v1/admin/rooms/{roomId}', () => {
   it('returns 200', async () => {
     const { handler } = await import('./admin-rooms-update');
-    const event = makeAdminEvent({
-      pathParameters: { roomId: 'glycine' },
+    const req = makeAdminRequest({
+      method: 'PATCH',
+      params: { roomId: 'glycine' },
       body: JSON.stringify({ name: 'La Glycine Modifiée' }),
     });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(200);
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(200);
   });
 
   it('returns 404 when room not found', async () => {
     vi.mocked(getRepository).mockReturnValue(makeRepo({ getRoom: vi.fn().mockResolvedValue(null) }));
     const { handler } = await import('./admin-rooms-update');
-    const event = makeAdminEvent({
-      pathParameters: { roomId: 'unknown' },
+    const req = makeAdminRequest({
+      method: 'PATCH',
+      params: { roomId: 'unknown' },
       body: JSON.stringify({ name: 'X' }),
     });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(404);
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -68,10 +76,10 @@ describe('PATCH /v1/admin/rooms/{roomId}', () => {
 describe('DELETE /v1/admin/rooms/{roomId}', () => {
   it('returns 200 with deletedRoomId', async () => {
     const { handler } = await import('./admin-rooms-delete');
-    const event = makeAdminEvent({ pathParameters: { roomId: 'glycine' } });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body ?? '{}');
+    const req = makeAdminRequest({ method: 'DELETE', params: { roomId: 'glycine' } });
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as { deletedRoomId: string };
     expect(body.deletedRoomId).toBe('glycine');
   });
 });
@@ -80,10 +88,10 @@ describe('DELETE /v1/admin/rooms/{roomId}', () => {
 describe('POST /v1/admin/rooms/{roomId}/photo-upload-url', () => {
   it('returns 200 with uploadUrl', async () => {
     const { handler } = await import('./admin-rooms-photo-url');
-    const event = makeAdminEvent({ pathParameters: { roomId: 'glycine' } });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body ?? '{}');
+    const req = makeAdminRequest({ method: 'POST', params: { roomId: 'glycine' } });
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as { uploadUrl: string };
     expect(typeof body.uploadUrl).toBe('string');
   });
 });
@@ -92,9 +100,9 @@ describe('POST /v1/admin/rooms/{roomId}/photo-upload-url', () => {
 describe('GET /v1/admin/users', () => {
   it('returns 200 with users', async () => {
     const { handler } = await import('./admin-users-list');
-    const res = await callHandler(handler as never, makeAdminEvent());
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body ?? '{}');
+    const res = await callHandler(handler, makeAdminRequest());
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as { users: unknown[] };
     expect(Array.isArray(body.users)).toBe(true);
   });
 });
@@ -103,11 +111,12 @@ describe('GET /v1/admin/users', () => {
 describe('POST /v1/admin/users/invite', () => {
   it('returns 201 with user', async () => {
     const { handler } = await import('./admin-users-invite');
-    const event = makeAdminEvent({
+    const req = makeAdminRequest({
+      method: 'POST',
       body: JSON.stringify({ email: 'new@example.com', displayName: 'Pierre', role: 'guest' }),
     });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(201);
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(201);
   });
 });
 
@@ -115,9 +124,9 @@ describe('POST /v1/admin/users/invite', () => {
 describe('DELETE /v1/admin/users/{userId}', () => {
   it('returns 200 with deletedUserId', async () => {
     const { handler } = await import('./admin-users-delete');
-    const event = makeAdminEvent({ pathParameters: { userId: 'user-123' } });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(200);
+    const req = makeAdminRequest({ method: 'DELETE', params: { userId: 'user-123' } });
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -125,9 +134,9 @@ describe('DELETE /v1/admin/users/{userId}', () => {
 describe('GET /v1/admin/house', () => {
   it('returns 200 with address included', async () => {
     const { handler } = await import('./admin-house-get');
-    const res = await callHandler(handler as never, makeAdminEvent());
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body ?? '{}');
+    const res = await callHandler(handler, makeAdminRequest());
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as { address: string };
     expect(body.address).toBe(mockHouseConfig.address);
   });
 });
@@ -136,9 +145,12 @@ describe('GET /v1/admin/house', () => {
 describe('PATCH /v1/admin/house', () => {
   it('returns 200 with updated config', async () => {
     const { handler } = await import('./admin-house-update');
-    const event = makeAdminEvent({ body: JSON.stringify({ welcomeNote: 'Nouveau mot.' }) });
-    const res = await callHandler(handler as never, event);
-    expect(res.statusCode).toBe(200);
+    const req = makeAdminRequest({
+      method: 'PATCH',
+      body: JSON.stringify({ welcomeNote: 'Nouveau mot.' }),
+    });
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -146,8 +158,9 @@ describe('PATCH /v1/admin/house', () => {
 describe('DELETE /v1/me', () => {
   it('returns 204', async () => {
     const { handler } = await import('./me-delete');
-    const res = await callHandler(handler as never, makeEvent());
-    expect(res.statusCode).toBe(204);
+    const req = makeRequest({ method: 'DELETE' });
+    const res = await callHandler(handler, req);
+    expect(res.status).toBe(204);
   });
 });
 
@@ -155,9 +168,9 @@ describe('DELETE /v1/me', () => {
 describe('GET /v1/me/export', () => {
   it('returns 200 with user and bookings', async () => {
     const { handler } = await import('./me-export');
-    const res = await callHandler(handler as never, makeEvent());
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body ?? '{}');
+    const res = await callHandler(handler, makeRequest());
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as { user: unknown; bookings: unknown[] };
     expect(body.user).toBeDefined();
     expect(Array.isArray(body.bookings)).toBe(true);
   });

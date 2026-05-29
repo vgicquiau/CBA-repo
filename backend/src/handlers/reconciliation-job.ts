@@ -1,17 +1,12 @@
-import type { ScheduledHandler } from 'aws-lambda';
-import { PublishCommand } from '@aws-sdk/client-sns';
-import { getRepository, getSnsClient } from '../api/deps';
+import { app, type InvocationContext } from '@azure/functions';
+import { getRepository, publishEvent } from '../api/deps';
 import { logger } from '../api/logger';
 import { todayIsoInAppTz, intervalsOverlap } from '@clos/shared-types';
 import type { Booking } from '@clos/shared-types';
 
-// EventBridge cron (0 1 * * ? * — 03:00 Paris) : détecte les doubles
-// réservations passées à travers la fenêtre de race condition et alerte l'admin.
-export const handler: ScheduledHandler = async () => {
-  const topicArn = process.env.SNS_TOPIC_ARN!;
+// Timer trigger — runs daily at 03:00 Paris time (cron: 0 0 3 * * *)
+export async function run(_timer: unknown, _context: InvocationContext): Promise<void> {
   const repo = getRepository();
-  const sns = getSnsClient();
-
   const today = todayIsoInAppTz();
   const bookings = await repo.listAllBookings({ fromDate: today });
 
@@ -39,23 +34,21 @@ export const handler: ScheduledHandler = async () => {
 
     if (conflictingIds.size > 0) {
       const bookingIds = [...conflictingIds];
-      const event = {
-        type: 'BOOKING_CONFLICT_DETECTED' as const,
+      await publishEvent({
+        type: 'BOOKING_CONFLICT_DETECTED',
         bookingIds,
         roomId,
         detectedAt: new Date().toISOString(),
-      };
-      await sns.send(new PublishCommand({
-        TopicArn: topicArn,
-        Message: JSON.stringify(event),
-        MessageAttributes: {
-          eventType: { DataType: 'String', StringValue: 'BOOKING_CONFLICT_DETECTED' },
-        },
-      }));
+      });
       logger.warn('Booking conflicts detected', { roomId, bookingIds });
       conflictsDetected++;
     }
   }
 
   logger.info('Reconciliation complete', { roomCount: byRoom.size, conflictsDetected });
-};
+}
+
+app.timer('reconciliation-job', {
+  schedule: '0 0 3 * * *', // daily at 03:00 UTC (≈ 04:00 Paris)
+  handler: run,
+});

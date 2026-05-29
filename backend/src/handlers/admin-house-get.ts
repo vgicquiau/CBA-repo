@@ -1,11 +1,18 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { withErrorHandling, requireRole, ok } from '../api/http';
 import { getRepository } from '../api/deps';
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  requireRole(event, 'admin');
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  requireRole(request, 'admin');
   const config = await getRepository().getHouseConfig();
-  return ok(config); // admin voit l'adresse
-};
+  return ok(config);
+}
+
+app.http('admin-house-get', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'admin/house',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);

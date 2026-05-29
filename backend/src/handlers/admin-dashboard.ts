@@ -1,16 +1,13 @@
-import type { APIGatewayProxyHandlerV2WithJWTAuthorizer } from 'aws-lambda';
+import { app, type HttpRequest, type HttpResponseInit, type InvocationContext } from '@azure/functions';
 import { withErrorHandling, requireRole, ok } from '../api/http';
 import { getRepository } from '../api/deps';
 import { todayIsoInAppTz, nightsBetween } from '@clos/shared-types';
 
-const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
-  requireRole(event, 'admin');
+async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
+  requireRole(request, 'admin');
   const repo = getRepository();
   const today = todayIsoInAppTz();
-  const [allBookings, rooms] = await Promise.all([
-    repo.listAllBookings(),
-    repo.listRooms(),
-  ]);
+  const [allBookings, rooms] = await Promise.all([repo.listAllBookings(), repo.listRooms()]);
   const upcomingArrivals = allBookings
     .filter((b) => b.end > today)
     .sort((a, b) => a.start.localeCompare(b.start))
@@ -22,10 +19,16 @@ const rawHandler: APIGatewayProxyHandlerV2WithJWTAuthorizer = async (event) => {
   const roomsMap = new Map(rooms.map((r) => [r.roomId, r]));
   const totalUpcomingRevenue = upcomingArrivals.reduce((acc, b) => {
     const room = roomsMap.get(b.roomId);
-    if (!room) return acc;
-    return acc + nightsBetween(b.start, b.end) * b.people * room.pricePerPerson;
+    return room ? acc + nightsBetween(b.start, b.end) * b.people * room.pricePerPerson : acc;
   }, 0);
   return ok({ todayCount, weekCount, totalRoomCount: rooms.length, totalUpcomingRevenue, upcomingArrivals });
-};
+}
+
+app.http('admin-dashboard', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'admin/dashboard',
+  handler: withErrorHandling(rawHandler),
+});
 
 export const handler = withErrorHandling(rawHandler);
