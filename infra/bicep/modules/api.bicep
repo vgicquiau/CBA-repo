@@ -460,7 +460,7 @@ resource configApiGatewayUrl 'Microsoft.AppConfiguration/configurationStores/key
   name: 'clos-${stage}-api-gateway-url'
   parent: appConfig
   properties: {
-    value: 'https://${apimService.properties.gatewayUrl}'
+    value: apimService.properties.gatewayUrl
     contentType: 'text/plain'
   }
 }
@@ -485,5 +485,5 @@ resource configApiCustomDomain 'Microsoft.AppConfiguration/configurationStores/k
 
 // ─── Outputs ──────────────────────────────────────────────────────────────────
 
-output apiGatewayUrl string = 'https://${apimService.properties.gatewayUrl}'
+output apiGatewayUrl string = apimService.properties.gatewayUrl
 output closApiPrincipalId string = closApiFunctionApp.identity.principalId
