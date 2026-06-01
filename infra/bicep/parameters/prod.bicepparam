@@ -15,7 +15,6 @@ param location = 'francecentral'
 param domain = 'www.clos-bon-accueil.fr'
 param apiDomain = 'api.clos-bon-accueil.fr'
 param cdnDomain = 'cdn.clos-bon-accueil.fr'
-param rootDomain = 'clos-bon-accueil.fr'
 
 // Cosmos DB: higher throughput + PITR for prod
 param enablePointInTimeRecovery = true

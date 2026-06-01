@@ -12,9 +12,6 @@ param location string
 @description('API custom domain (e.g. api.dev.clos-bon-accueil.fr)')
 param apiDomain string
 
-@description('Log Analytics workspace retention in days')
-param logRetentionDays int
-
 @description('Allowed CORS origins')
 param allowedOrigins array
 
@@ -26,12 +23,6 @@ param clientId string
 
 @description('App Configuration store name')
 param appConfigName string
-
-@description('Key Vault name')
-param keyVaultName string
-
-@description('Key Vault URI for app setting references')
-param keyVaultUri string
 
 @description('Cosmos DB account name (for data plane RBAC assignment)')
 param cosmosAccountName string
@@ -52,10 +43,6 @@ param appInsightsConnectionString string
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
   name: appConfigName
-}
-
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
 }
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview' existing = {
@@ -351,72 +338,16 @@ resource apimApi 'Microsoft.ApiManagement/service/apis@2023-05-01-preview' = {
 //   3. CORS
 //   4. Forward caller identity to backend via X-Forwarded-User header
 
+var loginEndpoint = environment().authentication.loginEndpoint
 var corsOriginsXml = join(map(allowedOrigins, origin => '<origin>${origin}</origin>'), '')
+var apimPolicyXml = '<policies><inbound><base /><validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true"><openid-config url="${loginEndpoint}${tenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${clientId}</audience></audiences><required-claims><claim name="oid" match="all" /></required-claims></validate-jwt><rate-limit-by-key calls="100" renewal-period="1" counter-key="@(context.Request.IpAddress)" increment-condition="@(context.Response.StatusCode &lt; 500)" /><cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override"><value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value></set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
 
 resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01-preview' = {
   name: 'policy'
   parent: apimApi
   properties: {
     format: 'xml'
-    value: '''<policies>
-  <inbound>
-    <base />
-    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true">
-      <openid-config url="https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration" />
-      <audiences>
-        <audience>${clientId}</audience>
-      </audiences>
-      <required-claims>
-        <claim name="oid" match="all" />
-      </required-claims>
-    </validate-jwt>
-    <rate-limit-by-key calls="100" renewal-period="1"
-      counter-key="@(context.Request.IpAddress)"
-      increment-condition="@(context.Response.StatusCode &lt; 500)" />
-    <cors allow-credentials="false">
-      <allowed-origins>${corsOriginsXml}</allowed-origins>
-      <allowed-methods>
-        <method>GET</method>
-        <method>POST</method>
-        <method>PATCH</method>
-        <method>DELETE</method>
-        <method>OPTIONS</method>
-      </allowed-methods>
-      <allowed-headers>
-        <header>Content-Type</header>
-        <header>Authorization</header>
-        <header>Idempotency-Key</header>
-      </allowed-headers>
-    </cors>
-    <set-header name="X-Forwarded-User" exists-action="override">
-      <value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value>
-    </set-header>
-  </inbound>
-  <backend>
-    <base />
-  </backend>
-  <outbound>
-    <base />
-    <set-header name="X-Content-Type-Options" exists-action="override">
-      <value>nosniff</value>
-    </set-header>
-    <set-header name="X-Frame-Options" exists-action="override">
-      <value>DENY</value>
-    </set-header>
-    <set-header name="Strict-Transport-Security" exists-action="override">
-      <value>max-age=31536000; includeSubDomains</value>
-    </set-header>
-    <set-header name="Referrer-Policy" exists-action="override">
-      <value>strict-origin-when-cross-origin</value>
-    </set-header>
-    <set-header name="Cache-Control" exists-action="override">
-      <value>no-store</value>
-    </set-header>
-  </outbound>
-  <on-error>
-    <base />
-  </on-error>
-</policies>'''
+    value: apimPolicyXml
   }
 }
 
@@ -529,6 +460,15 @@ resource configApiFunctionUrl 'Microsoft.AppConfiguration/configurationStores/ke
   parent: appConfig
   properties: {
     value: 'https://${closApiFunctionApp.properties.defaultHostName}/api'
+    contentType: 'text/plain'
+  }
+}
+
+resource configApiCustomDomain 'Microsoft.AppConfiguration/configurationStores/keyValues@2023-03-01' = {
+  name: 'clos-${stage}-api-custom-domain'
+  parent: appConfig
+  properties: {
+    value: apiDomain
     contentType: 'text/plain'
   }
 }

@@ -24,9 +24,6 @@ param allowedOrigins array
 @description('App Configuration store name (for writing runtime config entries)')
 param appConfigName string
 
-@description('Key Vault name (referenced in App Config for secrets)')
-param keyVaultName string
-
 // ─── App Configuration reference ─────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -166,12 +163,9 @@ resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01'
       enabled: stage == 'prod'
       days: stage == 'prod' ? 7 : 1
     }
-    staticWebsite: {
-      enabled: true
-      indexDocument: 'index.html'
-      errorDocument404Path: 'index.html'
-    }
   }
+  // Static website hosting cannot be set via ARM — enable post-deployment:
+  // az storage blob service-properties update --account-name <name> --static-website true --index-document index.html --404-document index.html
 }
 
 resource photosContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
@@ -191,203 +185,11 @@ resource webContainer 'Microsoft.Storage/storageAccounts/blobServices/containers
 }
 
 // ─── Azure CDN ────────────────────────────────────────────────────────────────
-// Standard_Microsoft CDN profile with two endpoints:
-//   - clos-cdn-photos-{stage}: serves room photos from the "photos" container
-//   - clos-cdn-web-{stage}:    serves the SPA from the "$web" container
-// Custom domains and TLS certificates are configured post-deployment via:
-//   az cdn custom-domain create --resource-group rg-clos-bon-accueil-{stage} ...
-// Azure CDN Standard from Microsoft handles TLS cert rotation automatically.
+// NOTE: Standard_Microsoft (CDN classic) no longer supports new profile creation.
+// CDN endpoints are NOT deployed via Bicep — configure via Azure Front Door Standard
+// or use the storage blob/web endpoints directly post-deployment.
+// Post-deployment: enable static website + configure Front Door via az CLI.
 
-resource cdnProfile 'Microsoft.Cdn/profiles@2023-05-01' = {
-  name: 'clos-cdn-${stage}'
-  location: 'global'
-  sku: {
-    name: 'Standard_Microsoft'
-  }
-}
-
-resource cdnEndpointPhotos 'Microsoft.Cdn/profiles/endpoints@2023-05-01' = {
-  name: 'clos-cdn-photos-${stage}'
-  parent: cdnProfile
-  location: 'global'
-  properties: {
-    originHostHeader: '${storageAccount.name}.blob.core.windows.net'
-    isHttpAllowed: false
-    isHttpsAllowed: true
-    queryStringCachingBehavior: 'IgnoreQueryString'
-    optimizationType: 'GeneralMediaStreaming'
-    origins: [
-      {
-        name: 'blob-origin'
-        properties: {
-          hostName: '${storageAccount.name}.blob.core.windows.net'
-          httpsPort: 443
-          originHostHeader: '${storageAccount.name}.blob.core.windows.net'
-        }
-      }
-    ]
-    deliveryPolicy: {
-      rules: [
-        {
-          name: 'EnforceHTTPS'
-          order: 1
-          conditions: [
-            {
-              name: 'RequestScheme'
-              parameters: {
-                typeName: 'DeliveryRuleRequestSchemeConditionParameters'
-                operator: 'Equal'
-                matchValues: ['HTTP']
-                negateCondition: false
-                transforms: []
-              }
-            }
-          ]
-          actions: [
-            {
-              name: 'UrlRedirect'
-              parameters: {
-                typeName: 'DeliveryRuleUrlRedirectActionParameters'
-                redirectType: 'Moved'
-                destinationProtocol: 'Https'
-              }
-            }
-          ]
-        }
-      ]
-    }
-  }
-}
-
-resource cdnEndpointWeb 'Microsoft.Cdn/profiles/endpoints@2023-05-01' = {
-  name: 'clos-cdn-web-${stage}'
-  parent: cdnProfile
-  location: 'global'
-  properties: {
-    originHostHeader: '${storageAccount.name}.z28.web.core.windows.net'
-    isHttpAllowed: false
-    isHttpsAllowed: true
-    queryStringCachingBehavior: 'IgnoreQueryString'
-    optimizationType: 'GeneralWebDelivery'
-    origins: [
-      {
-        name: 'static-web-origin'
-        properties: {
-          hostName: '${storageAccount.name}.z28.web.core.windows.net'
-          httpsPort: 443
-          originHostHeader: '${storageAccount.name}.z28.web.core.windows.net'
-        }
-      }
-    ]
-    deliveryPolicy: {
-      rules: [
-        {
-          name: 'EnforceHTTPS'
-          order: 1
-          conditions: [
-            {
-              name: 'RequestScheme'
-              parameters: {
-                typeName: 'DeliveryRuleRequestSchemeConditionParameters'
-                operator: 'Equal'
-                matchValues: ['HTTP']
-                negateCondition: false
-                transforms: []
-              }
-            }
-          ]
-          actions: [
-            {
-              name: 'UrlRedirect'
-              parameters: {
-                typeName: 'DeliveryRuleUrlRedirectActionParameters'
-                redirectType: 'Moved'
-                destinationProtocol: 'Https'
-              }
-            }
-          ]
-        }
-        {
-          name: 'SpaFallback'
-          order: 2
-          conditions: [
-            {
-              name: 'UrlFileExtension'
-              parameters: {
-                typeName: 'DeliveryRuleUrlFileExtensionMatchConditionParameters'
-                operator: 'LessThan'
-                negateCondition: false
-                matchValues: ['1']
-                transforms: []
-              }
-            }
-          ]
-          actions: [
-            {
-              name: 'UrlRewrite'
-              parameters: {
-                typeName: 'DeliveryRuleUrlRewriteActionParameters'
-                sourcePattern: '/'
-                destination: '/index.html'
-                preserveUnmatchedPath: false
-              }
-            }
-          ]
-        }
-        {
-          // Security headers injected on all SPA responses.
-          // NOTE: Content-Security-Policy is set post-deployment via CLI (single quotes
-          //   cannot be embedded in Bicep string literals without parser errors):
-          //   az cdn endpoint rule add --rule-name ContentSecurityPolicy \
-          //     --action-name ModifyResponseHeader --header-action Overwrite \
-          //     --header-name Content-Security-Policy \
-          //     --header-value "default-src 'self'; script-src 'self'; ..."
-          name: 'SecurityHeaders'
-          order: 3
-          conditions: []
-          actions: [
-            {
-              name: 'ModifyResponseHeader'
-              parameters: {
-                typeName: 'DeliveryRuleHeaderActionParameters'
-                headerAction: 'Overwrite'
-                headerName: 'X-Content-Type-Options'
-                value: 'nosniff'
-              }
-            }
-            {
-              name: 'ModifyResponseHeader'
-              parameters: {
-                typeName: 'DeliveryRuleHeaderActionParameters'
-                headerAction: 'Overwrite'
-                headerName: 'X-Frame-Options'
-                value: 'DENY'
-              }
-            }
-            {
-              name: 'ModifyResponseHeader'
-              parameters: {
-                typeName: 'DeliveryRuleHeaderActionParameters'
-                headerAction: 'Overwrite'
-                headerName: 'Strict-Transport-Security'
-                value: 'max-age=31536000; includeSubDomains'
-              }
-            }
-            {
-              name: 'ModifyResponseHeader'
-              parameters: {
-                typeName: 'DeliveryRuleHeaderActionParameters'
-                headerAction: 'Overwrite'
-                headerName: 'Referrer-Policy'
-                value: 'strict-origin-when-cross-origin'
-              }
-            }
-          ]
-        }
-      ]
-    }
-  }
-}
 
 // ─── App Configuration entries ────────────────────────────────────────────────
 
@@ -449,7 +251,7 @@ resource configCdnWebDomain 'Microsoft.AppConfiguration/configurationStores/keyV
   name: 'clos-${stage}-data-cdn-web-domain'
   parent: appConfig
   properties: {
-    value: cdnEndpointWeb.properties.hostName
+    value: storageAccount.properties.primaryEndpoints.web
     contentType: 'text/plain'
   }
 }
@@ -459,5 +261,5 @@ resource configCdnWebDomain 'Microsoft.AppConfiguration/configurationStores/keyV
 output cosmosAccountName string = cosmosAccount.name
 output storageAccountName string = storageAccount.name
 output storageBlobEndpoint string = storageAccount.properties.primaryEndpoints.blob
-output cdnPhotosDomain string = cdnEndpointPhotos.properties.hostName
-output cdnWebDomain string = cdnEndpointWeb.properties.hostName
+output cdnPhotosDomain string = storageAccount.properties.primaryEndpoints.blob
+output cdnWebDomain string = storageAccount.properties.primaryEndpoints.web

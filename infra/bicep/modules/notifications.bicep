@@ -9,9 +9,6 @@ param stage string
 @description('Primary Azure region')
 param location string
 
-@description('Log Analytics workspace retention in days')
-param logRetentionDays int
-
 @description('App Configuration store name')
 param appConfigName string
 
