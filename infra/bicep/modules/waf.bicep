@@ -12,6 +12,13 @@ param apimGatewayUrl string
 @description('App Configuration store name')
 param appConfigName string
 
+@description('Short suffix appended to resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
+param nameSuffix string = ''
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── App Configuration reference ─────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -24,7 +31,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' e
 // Microsoft_BotManagerRuleSet 1.0 covers bot scraping and credential stuffing.
 
 resource wafPolicy 'Microsoft.Network/frontDoorWebApplicationFirewallPolicies@2022-05-01' = {
-  name: 'closWaf${stage}'
+  name: 'closWaf${stage}${nameSuffix}'
   location: 'global'
   sku: {
     name: 'Standard_AzureFrontDoor'
@@ -60,7 +67,7 @@ resource wafPolicy 'Microsoft.Network/frontDoorWebApplicationFirewallPolicies@20
 // AzureFrontDoor.Backend service tag instead of APIM IP-based rule.
 
 resource frontDoorProfile 'Microsoft.Cdn/profiles@2023-05-01' = {
-  name: 'clos-afd-${stage}'
+  name: 'clos-afd-${stage}${kebabSuffix}'
   location: 'global'
   sku: {
     name: 'Standard_AzureFrontDoor'
@@ -68,7 +75,7 @@ resource frontDoorProfile 'Microsoft.Cdn/profiles@2023-05-01' = {
 }
 
 resource frontDoorEndpoint 'Microsoft.Cdn/profiles/afdEndpoints@2023-05-01' = {
-  name: 'clos-api-${stage}'
+  name: 'clos-api-${stage}${kebabSuffix}'
   parent: frontDoorProfile
   location: 'global'
   properties: {

@@ -42,13 +42,26 @@ param clientId string = ''
 @description('Admin email address for ops alert notifications — set at deploy time')
 param adminEmail string = 'admin@clos-bon-accueil.fr'
 
+@description('Short suffix appended to globally unique resource names to avoid collisions (lowercase alphanumeric, no hyphens). Example: vgi')
+param nameSuffix string = ''
+
+@description('Deploy ACS Email resources — set false when Microsoft.Communication is not registered (e.g. sandbox)')
+param enableEmailNotifications bool = true
+
+@description('Skip APIM JWT validation — dev/sandbox only, NEVER enable in prod')
+param authBypassEnabled bool = false
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── App Configuration (cross-module runtime config) ─────────────────────────
 // All runtime values (endpoints, names, domains) are written here by each module.
 // Function Apps read config at startup via DefaultAzureCredential + AzureAppConfigurationExtension.
 // Naming convention: clos-{stage}-{category}-{key}
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' = {
-  name: 'clos-appconfig-${stage}'
+  name: 'clos-appconfig-${stage}${kebabSuffix}'
   location: location
   sku: {
     name: 'Standard'
@@ -66,7 +79,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' =
 // Function App app settings reference these via @Microsoft.KeyVault(SecretUri=...) syntax.
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
-  name: 'clos-kv-${stage}'
+  name: 'clos-kv-${stage}${kebabSuffix}'
   location: location
   properties: {
     tenantId: subscription().tenantId
@@ -95,6 +108,7 @@ module data 'modules/data.bicep' = {
     cosmosMaxThroughput: cosmosMaxThroughput
     allowedOrigins: allowedOrigins
     appConfigName: appConfig.name
+    nameSuffix: nameSuffix
   }
 }
 
@@ -117,6 +131,7 @@ module monitoring 'modules/monitoring.bicep' = {
     logRetentionDays: logRetentionDays
     appConfigName: appConfig.name
     adminEmail: adminEmail
+    nameSuffix: nameSuffix
   }
 }
 
@@ -131,6 +146,8 @@ module notifications 'modules/notifications.bicep' = {
     cosmosAccountName: data.outputs.cosmosAccountName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     entraClientId: clientId
+    nameSuffix: nameSuffix
+    enableEmailNotifications: enableEmailNotifications
   }
   dependsOn: [auth]
 }
@@ -150,6 +167,8 @@ module api 'modules/api.bicep' = {
     serviceBusNamespace: notifications.outputs.serviceBusNamespace
     serviceBusTopicName: notifications.outputs.serviceBusTopicName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    nameSuffix: nameSuffix
+    authBypassEnabled: authBypassEnabled
   }
   dependsOn: [auth]
 }
@@ -160,6 +179,7 @@ module waf 'modules/waf.bicep' = {
     stage: stage
     apimGatewayUrl: api.outputs.apiGatewayUrl
     appConfigName: appConfig.name
+    nameSuffix: nameSuffix
   }
 }
 

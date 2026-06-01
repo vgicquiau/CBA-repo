@@ -18,6 +18,13 @@ param appConfigName string
 @description('Admin email address for operational alerts')
 param adminEmail string
 
+@description('Short suffix appended to resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
+param nameSuffix string = ''
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── Existing references ──────────────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -28,7 +35,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' e
 // Replaces CloudWatch Log Groups — single workspace for all Function logs.
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
-  name: 'clos-logs-${stage}'
+  name: 'clos-logs-${stage}${kebabSuffix}'
   location: location
   properties: {
     sku: {
@@ -48,7 +55,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10
 // Replaces X-Ray + CloudWatch Metrics — traces APIM → Function with correlation.
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  name: 'clos-insights-${stage}'
+  name: 'clos-insights-${stage}${kebabSuffix}'
   location: location
   kind: 'web'
   properties: {
@@ -64,7 +71,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 // Replaces CloudWatch Alarm → SNS topic → email subscription.
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
-  name: 'clos-ops-${stage}'
+  name: 'clos-ops-${stage}${kebabSuffix}'
   location: 'global'
   properties: {
     groupShortName: 'clos-ops'
@@ -84,7 +91,7 @@ resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
 // Fires at severity 2 (Warning) → triggers action group email.
 
 resource errorAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
-  name: 'clos-error-rate-${stage}'
+  name: 'clos-error-rate-${stage}${kebabSuffix}'
   location: location
   kind: 'LogAlert'
   properties: {

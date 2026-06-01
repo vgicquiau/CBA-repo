@@ -64,16 +64,20 @@ npm run build --workspace=frontend      # Vite build (→ frontend/dist)
 ```
 
 ### Infrastructure & Deployment (Azure — cible post-PM1)
+
+> **Sandbox** : le compte Azure restreint utilise `rg-sp4-d-vgi-azu-vgi-sandbox-txt` avec `nameSuffix=vgi`.
+> Voir le guide complet : `docs/deployment-sandbox.md`.
+
 ```bash
 # Valider les templates Bicep
 az deployment group validate \
-  --resource-group rg-clos-bon-accueil-dev \
+  --resource-group <rg-name> \
   --template-file infra/bicep/main.bicep \
   --parameters infra/bicep/parameters/dev.bicepparam
 
 # Déployer en dev
 az deployment group create \
-  --resource-group rg-clos-bon-accueil-dev \
+  --resource-group <rg-name> \
   --template-file infra/bicep/main.bicep \
   --parameters infra/bicep/parameters/dev.bicepparam
 
@@ -83,9 +87,14 @@ npm run seed --workspace=backend -- --stage dev
 # Déployer le frontend (après PM6)
 az storage blob upload-batch \
   --destination '$web' \
-  --account-name closwebdev \
+  --account-name closstorage<stage><nameSuffix> \
   --source frontend/dist
 ```
+
+**Paramètres Bicep notables** (`infra/bicep/main.bicep`) :
+- `nameSuffix` — suffixe court (ex. `vgi`) ajouté à tous les noms de ressources globalement uniques, pour éviter les collisions en sandbox/multi-instance.
+- `enableEmailNotifications` (défaut `true`) — mettre à `false` si `Microsoft.Communication` n'est pas enregistré dans la subscription.
+- `authBypassEnabled` (défaut `false`) — **sandbox uniquement** : supprime la validation JWT APIM et injecte `X-Forwarded-User: bypass-dev-user`. Ne jamais activer en prod.
 
 ### Linting & Formatting
 ```bash
@@ -192,8 +201,8 @@ app.http('route-name', {
 ## Deployment Strategy
 
 ### Two Stages
-- **Development** (`dev`): PITR off, mock bookings seeded, Application Insights sampling réduit, logs 7 days.
-- **Production** (`prod`): PITR on, no mock bookings, Application Insights full, logs 30 days.
+- **Development** (`dev`): PITR off, mock bookings seeded, Application Insights sampling réduit, logs 30 days (minimum PerGB2018 SKU).
+- **Production** (`prod`): PITR on, no mock bookings, Application Insights full, logs 90 days.
 
 ### Bicep Module Deployment Order (cible post-PM1)
 
@@ -264,6 +273,8 @@ Les certificats TLS pour Azure CDN sont gérés automatiquement — aucune contr
 | `backend/src/api/deps.ts` | Dependency injection (Repository, Logger, SDK clients) |
 | `backend/scripts/seed.ts` | Initial data seeding (HouseConfig, Rooms, mock Bookings on dev) — à écrire en P7 |
 | `infra/bicep/` | Modules Bicep Azure (créés en PM1) |
+| `infra/bicep/parameters/dev.bicepparam` | Paramètres sandbox (nameSuffix=vgi, authBypassEnabled=true, enableEmailNotifications=false) |
+| `docs/deployment-sandbox.md` | Guide de déploiement autonome pour le sandbox Azure restreint (5 étapes) |
 | `infra/lib/` | CDK stacks AWS (archive — ne pas modifier) |
 | `frontend/src/api/client.ts` | HTTP wrapper (fetch + auth token + error handling) |
 | `frontend/src/api/hooks.ts` | React Query hooks (9 queries + 10 mutations) |
@@ -363,11 +374,12 @@ The root directory contains a static React prototype (`app.jsx`, `screens-*.jsx`
 
 ## Next Steps
 
-**Décisions à prendre avant PM1** : D1 (Bicep vs Pulumi), D2 (granularité Function Apps) — voir `docs/migration-azure/02-mapping-services.md`.
+**PM1 est terminé** (Bicep scaffold complet — tous les modules écrits, validés, `dev.bicepparam` sandbox configuré).
 
 **Prochaine phase recommandée** :
-- **PM1** (Bicep scaffold) et **P10** (migration écrans) peuvent démarrer en parallèle.
+- **P10** (migration écrans prototype → Vite) peut démarrer sans dépendance Azure.
 - **PM2** (Cosmos DB) débloque P7 (seed) et PM4 (handlers).
+- **Déploiement sandbox** disponible dès maintenant — voir `docs/deployment-sandbox.md`.
 
 **Pre-deployment checklist (avant deploy prod)** :
 - `npm run typecheck --workspaces` passes.

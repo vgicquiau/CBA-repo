@@ -39,6 +39,16 @@ param serviceBusTopicName string
 @description('Application Insights connection string for telemetry')
 param appInsightsConnectionString string
 
+@description('Short suffix appended to globally unique resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
+param nameSuffix string = ''
+
+@description('Skip APIM JWT validation — dev/sandbox only, never enable in prod')
+param authBypassEnabled bool = false
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── Existing references ──────────────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -51,11 +61,11 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview
 
 // Existing references for RBAC scope reduction (SEV-006)
 resource dataStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: 'closstorage${stage}'
+  name: 'closstorage${stage}${nameSuffix}'
 }
 
 resource serviceBusNamespaceRef 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' existing = {
-  name: 'clos-servicebus-${stage}'
+  name: 'clos-servicebus-${stage}${kebabSuffix}'
 }
 
 resource serviceBusTopicRef 'Microsoft.ServiceBus/namespaces/topics@2022-10-01-preview' existing = {
@@ -66,7 +76,7 @@ resource serviceBusTopicRef 'Microsoft.ServiceBus/namespaces/topics@2022-10-01-p
 // ─── Storage Account for clos-api Function App ───────────────────────────────
 
 resource apiStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'closapifn${stage}'
+  name: 'closapifn${stage}${nameSuffix}'
   location: location
   kind: 'StorageV2'
   sku: {
@@ -83,7 +93,7 @@ resource apiStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 // ─── App Service Plan (Consumption) for clos-api ─────────────────────────────
 
 resource apiAppServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: 'clos-api-plan-${stage}'
+  name: 'clos-api-plan-${stage}${kebabSuffix}'
   location: location
   kind: 'functionapp'
   sku: {
@@ -101,7 +111,7 @@ resource apiAppServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 // getCurrentUserId() reads the oid claim forwarded by APIM as X-Forwarded-User.
 
 resource closApiFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
-  name: 'clos-api-${stage}'
+  name: 'clos-api-${stage}${kebabSuffix}'
   location: location
   kind: 'functionapp,linux'
   identity: {
@@ -117,10 +127,11 @@ resource closApiFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
       minimumElasticInstanceCount: 0
       ipSecurityRestrictions: [
         {
-          ipAddress: '${apimService.properties.publicIPAddresses[0]}/32'
+          tag: 'ServiceTag'
+          ipAddress: 'AzureFrontDoor.Backend'
           action: 'Allow'
           priority: 100
-          name: 'allow-apim-gateway'
+          name: 'allow-frontdoor'
         }
         {
           ipAddress: 'Any'
@@ -188,7 +199,7 @@ resource closApiFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
 
 // Cosmos DB data plane: Built-in Data Contributor
 resource cosmosRoleAssignmentApi 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-02-15-preview' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'cosmos-data-contributor')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'cosmos-data-contributor')
   parent: cosmosAccount
   properties: {
     roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
@@ -199,7 +210,7 @@ resource cosmosRoleAssignmentApi 'Microsoft.DocumentDB/databaseAccounts/sqlRoleA
 
 // Service Bus Data Sender (handlers publish domain events)
 resource sbSenderRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'sb-data-sender')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'sb-data-sender')
   scope: serviceBusTopicRef
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -213,7 +224,7 @@ resource sbSenderRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 
 // Storage Blob Data Contributor (generate SAS tokens for photo upload)
 resource blobContributorRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-blob-contributor')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'storage-blob-contributor')
   scope: dataStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -227,7 +238,7 @@ resource blobContributorRoleApi 'Microsoft.Authorization/roleAssignments@2022-04
 
 // App Configuration Data Reader
 resource appConfigReaderApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'appconfig-data-reader')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'appconfig-data-reader')
   scope: appConfig
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -241,7 +252,7 @@ resource appConfigReaderApi 'Microsoft.Authorization/roleAssignments@2022-04-01'
 
 // Storage Blob Data Owner (required for AzureWebJobsStorage Managed Identity)
 resource storageOwnerRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-blob-owner')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'storage-blob-owner')
   scope: apiStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -255,7 +266,7 @@ resource storageOwnerRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01
 
 // Storage Queue Data Contributor (required for AzureWebJobsStorage Managed Identity)
 resource storageQueueRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-queue-contributor')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'storage-queue-contributor')
   scope: apiStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -269,7 +280,7 @@ resource storageQueueRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01
 
 // Storage Table Data Contributor (required for AzureWebJobsStorage Managed Identity)
 resource storageTableRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-table-contributor')
+  name: guid(resourceGroup().id, closApiFunctionApp.name, 'storage-table-contributor')
   scope: apiStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -284,15 +295,11 @@ resource storageTableRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01
 // ─── Azure API Management (Consumption tier) ─────────────────────────────────
 // Consumption: pay-per-call, no VNet, no dedicated infrastructure.
 // Provides: JWT validation, rate limiting, CORS, custom domain.
-// WAF: APIM built-in rate limiting + OWASP rules emulated via policies.
-//   Full WAF requires Azure Front Door (upgrade path if needed post-PM1).
-// Custom domain (apiDomain) setup:
-//   az apim api update --resource-group rg-clos-bon-accueil-${stage} \
-//     --service-name clos-apim-${stage} ...
-//   Certificate managed by APIM (requires CNAME DNS record pointing to APIM gateway).
+// Full WAF provided by Azure Front Door (waf.bicep).
+// Custom domain (apiDomain) setup requires CNAME DNS record pointing to APIM gateway.
 
 resource apimService 'Microsoft.ApiManagement/service@2023-05-01-preview' = {
-  name: 'clos-apim-${stage}'
+  name: 'clos-apim-${stage}${kebabSuffix}'
   location: location
   sku: {
     name: 'Consumption'
@@ -331,16 +338,21 @@ resource apimApi 'Microsoft.ApiManagement/service/apis@2023-05-01-preview' = {
 }
 
 // ─── APIM API-level policy ────────────────────────────────────────────────────
-// Applied to all operations except health (which has an operation-level override).
 // Inbound:
-//   1. Validate JWT from Entra External ID (oid + roles claims)
-//   2. Rate limit: 100 calls/s per IP (burst) — spec: 100 burst/50 RPS
+//   1. Validate JWT from Entra External ID — skipped when authBypassEnabled = true
+//   2. Rate limit: 100 calls/s per IP
 //   3. CORS
-//   4. Forward caller identity to backend via X-Forwarded-User header
+//   4. Forward caller identity to backend via X-Forwarded-User
+//      When authBypassEnabled: fixed value 'bypass-dev-user' (no real token in sandbox)
 
 var loginEndpoint = environment().authentication.loginEndpoint
 var corsOriginsXml = join(map(allowedOrigins, origin => '<origin>${origin}</origin>'), '')
-var apimPolicyXml = '<policies><inbound><base /><validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true"><openid-config url="${loginEndpoint}${tenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${clientId}</audience></audiences><required-claims><claim name="oid" match="all" /></required-claims></validate-jwt><rate-limit-by-key calls="100" renewal-period="1" counter-key="@(context.Request.IpAddress)" increment-condition="@(context.Response.StatusCode &lt; 500)" /><cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override"><value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value></set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
+
+var validateJwtSnippet = authBypassEnabled ? '' : '<validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true"><openid-config url="${loginEndpoint}${tenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${clientId}</audience></audiences><required-claims><claim name="oid" match="all" /></required-claims></validate-jwt>'
+
+var forwardUserHeaderValue = authBypassEnabled ? '<value>bypass-dev-user</value>' : '<value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value>'
+
+var apimPolicyXml = '<policies><inbound><base />${validateJwtSnippet}<rate-limit-by-key calls="100" renewal-period="1" counter-key="@(context.Request.IpAddress)" increment-condition="@(context.Response.StatusCode &lt; 500)" /><cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override">${forwardUserHeaderValue}</set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
 
 resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01-preview' = {
   name: 'policy'
@@ -354,7 +366,6 @@ resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01
 // ─── APIM Operations ─────────────────────────────────────────────────────────
 // 29 operations matching the 29 Azure Function handlers (PM4).
 // One operation per route. Health is the only unauthenticated route.
-// Template parameters are declared for path variables.
 
 var apimOperationsList = [
   // ── Public ──────────────────────────────────────────────────────────────────
@@ -419,7 +430,6 @@ resource apimOperations 'Microsoft.ApiManagement/service/apis/operations@2023-05
 }]
 
 // Health operation policy override: skip JWT validation
-// The health-get operation index in the loop is 0
 resource apimHealthPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2023-05-01-preview' = {
   name: '${apimService.name}/${apimApi.name}/health-get/policy'
   dependsOn: [apimOperations]

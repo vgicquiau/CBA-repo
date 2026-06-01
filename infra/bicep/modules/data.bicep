@@ -24,6 +24,13 @@ param allowedOrigins array
 @description('App Configuration store name (for writing runtime config entries)')
 param appConfigName string
 
+@description('Short suffix appended to globally unique resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
+param nameSuffix string = ''
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── App Configuration reference ─────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -37,7 +44,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' e
 // Idempotency records use 24h TTL; all other items have no expiry.
 
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview' = {
-  name: 'clos-cosmos-${stage}'
+  name: 'clos-cosmos-${stage}${kebabSuffix}'
   location: location
   kind: 'GlobalDocumentDB'
   identity: {
@@ -124,7 +131,7 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
 //   - $web:   static website hosting for the SPA (Azure CDN serves from here in PM6)
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'closstorage${stage}'
+  name: 'closstorage${stage}${nameSuffix}'
   location: location
   kind: 'StorageV2'
   sku: {

@@ -27,6 +27,16 @@ param appInsightsConnectionString string
 @description('Entra app registration client ID (for auth-post-confirmation webhook token validation)')
 param entraClientId string
 
+@description('Short suffix appended to globally unique resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
+param nameSuffix string = ''
+
+@description('Deploy ACS Email resources — disable when Microsoft.Communication provider is not registered')
+param enableEmailNotifications bool = true
+
+// ─── Computed names ───────────────────────────────────────────────────────────
+
+var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
 // ─── Existing references ──────────────────────────────────────────────────────
 
 resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' existing = {
@@ -49,7 +59,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview
 //   - reconciliation-monitor: could trigger monitoring alerts (currently unused)
 
 resource serviceBusNamespaceResource 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
-  name: 'clos-servicebus-${stage}'
+  name: 'clos-servicebus-${stage}${kebabSuffix}'
   location: location
   sku: {
     name: 'Standard'
@@ -95,11 +105,10 @@ resource sbSubscriptionMonitor 'Microsoft.ServiceBus/namespaces/topics/subscript
 // ─── Azure Communication Services Email ───────────────────────────────────────
 // Replaces SES + templated emails.
 // Note (D3): ACS Email Data Location must be verified for RGPD compliance.
-//   az communication email list --resource-group rg-clos-bon-accueil-${stage} (post-deploy)
-// ACS Email in France Central: check availability before PM5.
-// Fallback: Sweden Central (EU data residency, RGPD compliant).
+// Requires Microsoft.Communication provider — disable via enableEmailNotifications = false
+// when the provider is not registered in the subscription (e.g. sandbox environments).
 
-resource acsEmail 'Microsoft.Communication/emailServices@2023-06-01-preview' = {
+resource acsEmail 'Microsoft.Communication/emailServices@2023-06-01-preview' = if (enableEmailNotifications) {
   name: 'clos-email-${stage}'
   location: 'global'
   properties: {
@@ -107,7 +116,7 @@ resource acsEmail 'Microsoft.Communication/emailServices@2023-06-01-preview' = {
   }
 }
 
-resource acsCommunication 'Microsoft.Communication/communicationServices@2023-06-01-preview' = {
+resource acsCommunication 'Microsoft.Communication/communicationServices@2023-06-01-preview' = if (enableEmailNotifications) {
   name: 'clos-comm-${stage}'
   location: 'global'
   properties: {
@@ -118,7 +127,7 @@ resource acsCommunication 'Microsoft.Communication/communicationServices@2023-06
 // ─── Storage Account for clos-jobs Function App ───────────────────────────────
 
 resource jobsStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: 'closjobsfn${stage}'
+  name: 'closjobsfn${stage}${nameSuffix}'
   location: location
   kind: 'StorageV2'
   sku: {
@@ -135,7 +144,7 @@ resource jobsStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 // ─── App Service Plan (Consumption) for clos-jobs ────────────────────────────
 
 resource jobsAppServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: 'clos-jobs-plan-${stage}'
+  name: 'clos-jobs-plan-${stage}${kebabSuffix}'
   location: location
   kind: 'functionapp'
   sku: {
@@ -155,8 +164,77 @@ resource jobsAppServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 // Node.js 20, arm64 not available on Consumption Y1 (arm64 requires Premium/Dedicated).
 // Using x64 for Consumption; upgrade to Premium in PM7 if arm64 is needed for perf.
 
+var baseJobsAppSettings = [
+  {
+    name: 'AzureWebJobsStorage__accountName'
+    value: jobsStorageAccount.name
+  }
+  {
+    name: 'WEBSITE_RUN_FROM_PACKAGE'
+    value: '1'
+  }
+  {
+    name: 'FUNCTIONS_WORKER_RUNTIME'
+    value: 'node'
+  }
+  {
+    name: 'FUNCTIONS_EXTENSION_VERSION'
+    value: '~4'
+  }
+  {
+    name: 'AZURE_APPCONFIG_ENDPOINT'
+    value: 'https://${appConfigName}.azconfig.io'
+  }
+  {
+    name: 'SERVICEBUS_FULLY_QUALIFIED_NAMESPACE'
+    value: '${serviceBusNamespaceResource.name}.servicebus.windows.net'
+  }
+  {
+    name: 'SERVICEBUS_TOPIC_NAME'
+    value: serviceBusTopic.name
+  }
+  {
+    name: 'STAGE'
+    value: stage
+  }
+  {
+    name: 'LOG_LEVEL'
+    value: stage == 'prod' ? 'INFO' : 'DEBUG'
+  }
+  {
+    name: 'ENTRA_CLIENT_ID'
+    value: entraClientId
+  }
+  {
+    name: 'ADMIN_EMAIL'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/admin-email/)'
+  }
+  {
+    name: 'EMAIL_FROM_ADDRESS'
+    value: '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/email-from-address/)'
+  }
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: appInsightsConnectionString
+  }
+  {
+    name: 'WEBSITE_NODE_DEFAULT_VERSION'
+    value: '~20'
+  }
+]
+
+// ACS_ENDPOINT only included when email notifications are enabled.
+// any() bypasses null-check for the conditional resource — safe because this branch
+// is only reached when enableEmailNotifications = true (same condition as acsCommunication).
+var acsJobsAppSettings = enableEmailNotifications ? [
+  {
+    name: 'ACS_ENDPOINT'
+    value: any(acsCommunication).properties.hostName
+  }
+] : []
+
 resource closJobsFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
-  name: 'clos-jobs-${stage}'
+  name: 'clos-jobs-${stage}${kebabSuffix}'
   location: location
   kind: 'functionapp,linux'
   identity: {
@@ -170,68 +248,7 @@ resource closJobsFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
       linuxFxVersion: 'Node|20'
       functionAppScaleLimit: 10
       minimumElasticInstanceCount: 0
-      appSettings: [
-        {
-          name: 'AzureWebJobsStorage__accountName'
-          value: jobsStorageAccount.name
-        }
-        {
-          name: 'WEBSITE_RUN_FROM_PACKAGE'
-          value: '1'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'node'
-        }
-        {
-          name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
-        }
-        {
-          name: 'AZURE_APPCONFIG_ENDPOINT'
-          value: 'https://${appConfigName}.azconfig.io'
-        }
-        {
-          name: 'SERVICEBUS_FULLY_QUALIFIED_NAMESPACE'
-          value: '${serviceBusNamespaceResource.name}.servicebus.windows.net'
-        }
-        {
-          name: 'SERVICEBUS_TOPIC_NAME'
-          value: serviceBusTopic.name
-        }
-        {
-          name: 'STAGE'
-          value: stage
-        }
-        {
-          name: 'LOG_LEVEL'
-          value: stage == 'prod' ? 'INFO' : 'DEBUG'
-        }
-        {
-          name: 'ENTRA_CLIENT_ID'
-          value: entraClientId
-        }
-        {
-          name: 'ADMIN_EMAIL'
-          value: '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/admin-email/)'
-        }
-        {
-          name: 'EMAIL_FROM_ADDRESS'
-          value: '@Microsoft.KeyVault(SecretUri=${keyVaultUri}secrets/email-from-address/)'
-        }
-        {
-          name: 'ACS_ENDPOINT'
-          value: acsCommunication.properties.hostName
-        }
-        {
-          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-          value: appInsightsConnectionString
-        }
-        {
-          name: 'WEBSITE_NODE_DEFAULT_VERSION'
-          value: '~20'
-        }
-      ]
+      appSettings: concat(baseJobsAppSettings, acsJobsAppSettings)
     }
   }
 }
@@ -240,7 +257,7 @@ resource closJobsFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
 
 // Cosmos DB data plane: Built-in Data Contributor (role ID: 00000000-0000-0000-0000-000000000002)
 resource cosmosRoleAssignmentJobs 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-02-15-preview' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'cosmos-data-contributor')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'cosmos-data-contributor')
   parent: cosmosAccount
   properties: {
     roleDefinitionId: '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
@@ -251,7 +268,7 @@ resource cosmosRoleAssignmentJobs 'Microsoft.DocumentDB/databaseAccounts/sqlRole
 
 // Service Bus Data Receiver on the dispatcher subscription
 resource sbReceiverRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'sb-data-receiver')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'sb-data-receiver')
   scope: serviceBusTopic
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -265,7 +282,7 @@ resource sbReceiverRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01'
 
 // Service Bus Data Sender (reconciliation-job publishes to the topic)
 resource sbSenderRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'sb-data-sender')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'sb-data-sender')
   scope: serviceBusTopic
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -279,7 +296,7 @@ resource sbSenderRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 
 // Key Vault Secrets User (to read admin-email and email-from-address)
 resource kvSecretsUserJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'kv-secrets-user')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'kv-secrets-user')
   scope: keyVault
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -293,7 +310,7 @@ resource kvSecretsUserJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' 
 
 // App Configuration Data Reader
 resource appConfigReaderJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'appconfig-data-reader')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'appconfig-data-reader')
   scope: appConfig
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -307,7 +324,7 @@ resource appConfigReaderJobs 'Microsoft.Authorization/roleAssignments@2022-04-01
 
 // Storage Blob Data Owner (required for AzureWebJobsStorage Managed Identity)
 resource storageOwnerRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-blob-owner')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'storage-blob-owner')
   scope: jobsStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -321,7 +338,7 @@ resource storageOwnerRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-0
 
 // Storage Queue Data Contributor (required for AzureWebJobsStorage Managed Identity)
 resource storageQueueRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-queue-contributor')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'storage-queue-contributor')
   scope: jobsStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -335,7 +352,7 @@ resource storageQueueRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-0
 
 // Storage Table Data Contributor (required for AzureWebJobsStorage Managed Identity)
 resource storageTableRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-table-contributor')
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'storage-table-contributor')
   scope: jobsStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -347,9 +364,9 @@ resource storageTableRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-0
   }
 }
 
-// Communication Services Email Sender (data-plane only, replaces over-broad Contributor)
-resource acsEmailSenderRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'acs-email-sender')
+// Communication Services Email Sender — only deployed when ACS is enabled
+resource acsEmailSenderRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableEmailNotifications) {
+  name: guid(resourceGroup().id, closJobsFunctionApp.name, 'acs-email-sender')
   scope: acsCommunication
   properties: {
     roleDefinitionId: subscriptionResourceId(
@@ -381,11 +398,12 @@ resource configServiceBusTopic 'Microsoft.AppConfiguration/configurationStores/k
   }
 }
 
-resource configAcsEndpoint 'Microsoft.AppConfiguration/configurationStores/keyValues@2023-03-01' = {
+// ACS endpoint config entry only written when ACS is enabled
+resource configAcsEndpoint 'Microsoft.AppConfiguration/configurationStores/keyValues@2023-03-01' = if (enableEmailNotifications) {
   name: 'clos-${stage}-notifications-acs-endpoint'
   parent: appConfig
   properties: {
-    value: acsCommunication.properties.hostName
+    value: any(acsCommunication).properties.hostName
     contentType: 'text/plain'
   }
 }
