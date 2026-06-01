@@ -17,7 +17,7 @@
     "@azure/service-bus": "^7.9.0",
     "@azure/storage-blob": "^12.25.0",
     "@clos/shared-types": "*",
-    "jose": "5.9.6",
+    "jose": "6.2.3",
     "uuid": "10.0.0",
     "zod": "3.23.8"
   },
