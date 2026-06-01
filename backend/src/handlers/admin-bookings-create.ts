@@ -7,15 +7,29 @@ import { logger } from '../api/logger';
 import { generateBookingReference } from '../shared/identifiers';
 import type { Booking } from '@clos/shared-types';
 
+function isValidCalendarDate(dateStr: string): boolean {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(
+  isValidCalendarDate,
+  { message: 'Invalid calendar date' },
+);
+
 const BodySchema = z.object({
-  roomId: z.string().min(1),
-  start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  people: z.number().int().min(1),
-  name: z.string().min(1),
-  notes: z.string().default(''),
+  roomId: z.string().min(1).max(100),
+  start: DateSchema,
+  end: DateSchema,
+  people: z.number().int().min(1).max(20),
+  name: z.string().min(1).max(200),
+  notes: z.string().max(2000).default(''),
   userId: z.string().nullable().default(null),
-});
+}).refine(
+  (data) => data.start < data.end,
+  { message: 'start must be before end', path: ['end'] },
+);
 
 async function rawHandler(request: HttpRequest, _context: InvocationContext): Promise<HttpResponseInit> {
   requireRole(request, 'admin');

@@ -12,9 +12,6 @@ param location string
 @description('API custom domain (e.g. api.dev.clos-bon-accueil.fr)')
 param apiDomain string
 
-@description('Log Analytics workspace retention in days')
-param logRetentionDays int
-
 @description('Allowed CORS origins')
 param allowedOrigins array
 
@@ -26,12 +23,6 @@ param clientId string
 
 @description('App Configuration store name')
 param appConfigName string
-
-@description('Key Vault name')
-param keyVaultName string
-
-@description('Key Vault URI for app setting references')
-param keyVaultUri string
 
 @description('Cosmos DB account name (for data plane RBAC assignment)')
 param cosmosAccountName string
@@ -54,12 +45,22 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' e
   name: appConfigName
 }
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
 resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview' existing = {
   name: cosmosAccountName
+}
+
+// Existing references for RBAC scope reduction (SEV-006)
+resource dataStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: 'closstorage${stage}'
+}
+
+resource serviceBusNamespaceRef 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' existing = {
+  name: 'clos-servicebus-${stage}'
+}
+
+resource serviceBusTopicRef 'Microsoft.ServiceBus/namespaces/topics@2022-10-01-preview' existing = {
+  name: 'clos-notifications-${stage}'
+  parent: serviceBusNamespaceRef
 }
 
 // ─── Storage Account for clos-api Function App ───────────────────────────────
@@ -75,6 +76,7 @@ resource apiStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
   }
 }
 
@@ -113,10 +115,25 @@ resource closApiFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
       linuxFxVersion: 'Node|20'
       functionAppScaleLimit: 20
       minimumElasticInstanceCount: 0
+      ipSecurityRestrictions: [
+        {
+          ipAddress: '${apimService.properties.publicIPAddresses[0]}/32'
+          action: 'Allow'
+          priority: 100
+          name: 'allow-apim-gateway'
+        }
+        {
+          ipAddress: 'Any'
+          action: 'Deny'
+          priority: 2147483647
+          name: 'deny-all'
+        }
+      ]
+      ipSecurityRestrictionsDefaultAction: 'Deny'
       appSettings: [
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${apiStorageAccount.name};AccountKey=${apiStorageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
+          name: 'AzureWebJobsStorage__accountName'
+          value: apiStorageAccount.name
         }
         {
           name: 'WEBSITE_RUN_FROM_PACKAGE'
@@ -183,7 +200,7 @@ resource cosmosRoleAssignmentApi 'Microsoft.DocumentDB/databaseAccounts/sqlRoleA
 // Service Bus Data Sender (handlers publish domain events)
 resource sbSenderRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, 'clos-api-${stage}', 'sb-data-sender')
-  scope: resourceGroup()
+  scope: serviceBusTopicRef
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
@@ -197,7 +214,7 @@ resource sbSenderRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
 // Storage Blob Data Contributor (generate SAS tokens for photo upload)
 resource blobContributorRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-blob-contributor')
-  scope: resourceGroup()
+  scope: dataStorageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
@@ -216,6 +233,48 @@ resource appConfigReaderApi 'Microsoft.Authorization/roleAssignments@2022-04-01'
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
       '516239f1-63e1-4d78-a4de-a74fb236a071'  // App Configuration Data Reader
+    )
+    principalId: closApiFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Blob Data Owner (required for AzureWebJobsStorage Managed Identity)
+resource storageOwnerRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-blob-owner')
+  scope: apiStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'  // Storage Blob Data Owner
+    )
+    principalId: closApiFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Queue Data Contributor (required for AzureWebJobsStorage Managed Identity)
+resource storageQueueRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-queue-contributor')
+  scope: apiStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '974c5e8b-45b9-4653-ba55-5f855dd0fb88'  // Storage Queue Data Contributor
+    )
+    principalId: closApiFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Table Data Contributor (required for AzureWebJobsStorage Managed Identity)
+resource storageTableRoleApi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-api-${stage}', 'storage-table-contributor')
+  scope: apiStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'  // Storage Table Data Contributor
     )
     principalId: closApiFunctionApp.identity.principalId
     principalType: 'ServicePrincipal'
@@ -279,57 +338,16 @@ resource apimApi 'Microsoft.ApiManagement/service/apis@2023-05-01-preview' = {
 //   3. CORS
 //   4. Forward caller identity to backend via X-Forwarded-User header
 
+var loginEndpoint = environment().authentication.loginEndpoint
 var corsOriginsXml = join(map(allowedOrigins, origin => '<origin>${origin}</origin>'), '')
+var apimPolicyXml = '<policies><inbound><base /><validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true"><openid-config url="${loginEndpoint}${tenantId}/v2.0/.well-known/openid-configuration" /><audiences><audience>${clientId}</audience></audiences><required-claims><claim name="oid" match="all" /></required-claims></validate-jwt><rate-limit-by-key calls="100" renewal-period="1" counter-key="@(context.Request.IpAddress)" increment-condition="@(context.Response.StatusCode &lt; 500)" /><cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override"><value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value></set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
 
 resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01-preview' = {
   name: 'policy'
   parent: apimApi
   properties: {
     format: 'xml'
-    value: '''<policies>
-  <inbound>
-    <base />
-    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" require-expiration-time="true">
-      <openid-config url="https://login.microsoftonline.com/${tenantId}/v2.0/.well-known/openid-configuration" />
-      <audiences>
-        <audience>${clientId}</audience>
-      </audiences>
-      <required-claims>
-        <claim name="oid" match="all" />
-      </required-claims>
-    </validate-jwt>
-    <rate-limit-by-key calls="100" renewal-period="1"
-      counter-key="@(context.Request.IpAddress)"
-      increment-condition="@(context.Response.StatusCode &lt; 500)" />
-    <cors allow-credentials="false">
-      <allowed-origins>${corsOriginsXml}</allowed-origins>
-      <allowed-methods>
-        <method>GET</method>
-        <method>POST</method>
-        <method>PATCH</method>
-        <method>DELETE</method>
-        <method>OPTIONS</method>
-      </allowed-methods>
-      <allowed-headers>
-        <header>Content-Type</header>
-        <header>Authorization</header>
-        <header>Idempotency-Key</header>
-      </allowed-headers>
-    </cors>
-    <set-header name="X-Forwarded-User" exists-action="override">
-      <value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value>
-    </set-header>
-  </inbound>
-  <backend>
-    <base />
-  </backend>
-  <outbound>
-    <base />
-  </outbound>
-  <on-error>
-    <base />
-  </on-error>
-</policies>'''
+    value: apimPolicyXml
   }
 }
 
@@ -409,9 +427,9 @@ resource apimHealthPolicy 'Microsoft.ApiManagement/service/apis/operations/polic
     format: 'xml'
     value: '''<policies>
   <inbound>
-    <base />
-    <!-- Override: skip JWT validation for health check -->
-    <set-variable name="skipJwtValidation" value="true" />
+    <rate-limit-by-key calls="20" renewal-period="1"
+      counter-key="@(context.Request.IpAddress)"
+      increment-condition="@(context.Response.StatusCode &lt; 500)" />
   </inbound>
   <backend>
     <base />
@@ -442,6 +460,15 @@ resource configApiFunctionUrl 'Microsoft.AppConfiguration/configurationStores/ke
   parent: appConfig
   properties: {
     value: 'https://${closApiFunctionApp.properties.defaultHostName}/api'
+    contentType: 'text/plain'
+  }
+}
+
+resource configApiCustomDomain 'Microsoft.AppConfiguration/configurationStores/keyValues@2023-03-01' = {
+  name: 'clos-${stage}-api-custom-domain'
+  parent: appConfig
+  properties: {
+    value: apiDomain
     contentType: 'text/plain'
   }
 }

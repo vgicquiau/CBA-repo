@@ -109,14 +109,14 @@ describe('GET /v1/admin/users', () => {
 
 // ─── admin-users-invite ──────────────────────────────────────────────────────
 describe('POST /v1/admin/users/invite', () => {
-  it('returns 201 with user', async () => {
+  it('returns 501 — endpoint blocked until Graph API integration (PM4)', async () => {
     const { handler } = await import('./admin-users-invite');
     const req = makeAdminRequest({
       method: 'POST',
       body: JSON.stringify({ email: 'new@example.com', displayName: 'Pierre', role: 'guest' }),
     });
     const res = await callHandler(handler, req);
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(501);
   });
 });
 

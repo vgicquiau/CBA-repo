@@ -69,7 +69,7 @@ resource configAuthIssuer 'Microsoft.AppConfiguration/configurationStores/keyVal
   parent: appConfig
   properties: {
     // Standard Entra v2 issuer — update to Entra External ID specific URL in PM3
-    value: 'https://login.microsoftonline.com/${tenantId}/v2.0'
+    value: '${environment().authentication.loginEndpoint}${tenantId}/v2.0'
     contentType: 'text/plain'
   }
 }

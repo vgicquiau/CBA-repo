@@ -18,9 +18,6 @@ param apiDomain string
 @description('Photos CDN domain (e.g. cdn.dev.clos-bon-accueil.fr)')
 param cdnDomain string
 
-@description('Root DNS zone name')
-param rootDomain string = 'clos-bon-accueil.fr'
-
 @description('Enable Cosmos DB continuous backup (PITR)')
 param enablePointInTimeRecovery bool = false
 
@@ -30,8 +27,8 @@ param enablePointInTimeRecovery bool = false
 param cosmosMaxThroughput int = 1000
 
 @description('Log Analytics workspace retention in days')
-@allowed([7, 14, 30, 90, 180, 365])
-param logRetentionDays int = 7
+@allowed([30, 90, 180, 365])
+param logRetentionDays int = 30
 
 @description('Allowed CORS origins for the API and Blob Storage')
 param allowedOrigins array = []
@@ -58,7 +55,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2023-03-01' =
   }
   properties: {
     disableLocalAuth: false
-    softDeleteRetentionInDays: stage == 'prod' ? 7 : 0
+    softDeleteRetentionInDays: stage == 'prod' ? 7 : 1
   }
 }
 
@@ -98,7 +95,6 @@ module data 'modules/data.bicep' = {
     cosmosMaxThroughput: cosmosMaxThroughput
     allowedOrigins: allowedOrigins
     appConfigName: appConfig.name
-    keyVaultName: keyVault.name
   }
 }
 
@@ -129,14 +125,14 @@ module notifications 'modules/notifications.bicep' = {
   params: {
     stage: stage
     location: location
-    logRetentionDays: logRetentionDays
     appConfigName: appConfig.name
     keyVaultName: keyVault.name
     keyVaultUri: keyVault.properties.vaultUri
     cosmosAccountName: data.outputs.cosmosAccountName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    entraClientId: clientId
   }
-  dependsOn: [data, auth]
+  dependsOn: [auth]
 }
 
 module api 'modules/api.bicep' = {
@@ -145,20 +141,26 @@ module api 'modules/api.bicep' = {
     stage: stage
     location: location
     apiDomain: apiDomain
-    logRetentionDays: logRetentionDays
     allowedOrigins: allowedOrigins
     tenantId: tenantId
     clientId: clientId
     appConfigName: appConfig.name
-    keyVaultName: keyVault.name
-    keyVaultUri: keyVault.properties.vaultUri
     cosmosAccountName: data.outputs.cosmosAccountName
     storageBlobEndpoint: data.outputs.storageBlobEndpoint
     serviceBusNamespace: notifications.outputs.serviceBusNamespace
     serviceBusTopicName: notifications.outputs.serviceBusTopicName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
-  dependsOn: [data, auth, notifications]
+  dependsOn: [auth]
+}
+
+module waf 'modules/waf.bicep' = {
+  name: 'waf'
+  params: {
+    stage: stage
+    apimGatewayUrl: api.outputs.apiGatewayUrl
+    appConfigName: appConfig.name
+  }
 }
 
 module frontend 'modules/frontend.bicep' = {
@@ -172,7 +174,6 @@ module frontend 'modules/frontend.bicep' = {
     tenantId: tenantId
     clientId: clientId
   }
-  dependsOn: [data, api]
 }
 
 // ─── Top-level outputs ────────────────────────────────────────────────────────

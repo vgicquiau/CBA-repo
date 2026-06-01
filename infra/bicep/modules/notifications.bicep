@@ -9,9 +9,6 @@ param stage string
 @description('Primary Azure region')
 param location string
 
-@description('Log Analytics workspace retention in days')
-param logRetentionDays int
-
 @description('App Configuration store name')
 param appConfigName string
 
@@ -26,6 +23,9 @@ param cosmosAccountName string
 
 @description('Application Insights connection string for telemetry')
 param appInsightsConnectionString string
+
+@description('Entra app registration client ID (for auth-post-confirmation webhook token validation)')
+param entraClientId string
 
 // ─── Existing references ──────────────────────────────────────────────────────
 
@@ -128,6 +128,7 @@ resource jobsStorageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
   }
 }
 
@@ -171,8 +172,8 @@ resource closJobsFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
       minimumElasticInstanceCount: 0
       appSettings: [
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${jobsStorageAccount.name};AccountKey=${jobsStorageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
+          name: 'AzureWebJobsStorage__accountName'
+          value: jobsStorageAccount.name
         }
         {
           name: 'WEBSITE_RUN_FROM_PACKAGE'
@@ -205,6 +206,10 @@ resource closJobsFunctionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'LOG_LEVEL'
           value: stage == 'prod' ? 'INFO' : 'DEBUG'
+        }
+        {
+          name: 'ENTRA_CLIENT_ID'
+          value: entraClientId
         }
         {
           name: 'ADMIN_EMAIL'
@@ -300,14 +305,56 @@ resource appConfigReaderJobs 'Microsoft.Authorization/roleAssignments@2022-04-01
   }
 }
 
-// ACS Contributor (required to send emails via DefaultAzureCredential / Managed Identity)
-resource acsContributorRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'acs-contributor')
+// Storage Blob Data Owner (required for AzureWebJobsStorage Managed Identity)
+resource storageOwnerRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-blob-owner')
+  scope: jobsStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'  // Storage Blob Data Owner
+    )
+    principalId: closJobsFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Queue Data Contributor (required for AzureWebJobsStorage Managed Identity)
+resource storageQueueRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-queue-contributor')
+  scope: jobsStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '974c5e8b-45b9-4653-ba55-5f855dd0fb88'  // Storage Queue Data Contributor
+    )
+    principalId: closJobsFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Storage Table Data Contributor (required for AzureWebJobsStorage Managed Identity)
+resource storageTableRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'storage-table-contributor')
+  scope: jobsStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'  // Storage Table Data Contributor
+    )
+    principalId: closJobsFunctionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Communication Services Email Sender (data-plane only, replaces over-broad Contributor)
+resource acsEmailSenderRoleJobs 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, 'clos-jobs-${stage}', 'acs-email-sender')
   scope: acsCommunication
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
-      'b24988ac-6180-42a0-ab88-20f7382dd24c'  // Contributor
+      'b9a7eb27-f8ce-4e22-8edf-e40f1b79e8d2'  // Communication Services Email Sender
     )
     principalId: closJobsFunctionApp.identity.principalId
     principalType: 'ServicePrincipal'

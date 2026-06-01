@@ -15,14 +15,13 @@ param location = 'francecentral'
 param domain = 'dev.clos-bon-accueil.fr'
 param apiDomain = 'api.dev.clos-bon-accueil.fr'
 param cdnDomain = 'cdn.dev.clos-bon-accueil.fr'
-param rootDomain = 'clos-bon-accueil.fr'
 
 // Cosmos DB: low throughput for dev, no PITR
 param enablePointInTimeRecovery = false
 param cosmosMaxThroughput = 1000
 
-// Logs: 7-day retention for dev
-param logRetentionDays = 7
+// Logs: 30-day minimum for PerGB2018 SKU (Log Analytics + App Insights)
+param logRetentionDays = 30
 
 // CORS: localhost + dev frontend
 param allowedOrigins = [
