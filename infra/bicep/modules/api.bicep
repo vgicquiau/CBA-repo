@@ -340,10 +340,11 @@ resource apimApi 'Microsoft.ApiManagement/service/apis@2023-05-01-preview' = {
 // ─── APIM API-level policy ────────────────────────────────────────────────────
 // Inbound:
 //   1. Validate JWT from Entra External ID — skipped when authBypassEnabled = true
-//   2. Rate limit: 100 calls/s per IP
-//   3. CORS
-//   4. Forward caller identity to backend via X-Forwarded-User
+//   2. CORS
+//   3. Forward caller identity to backend via X-Forwarded-User
 //      When authBypassEnabled: fixed value 'bypass-dev-user' (no real token in sandbox)
+// Note: rate-limit-by-key is NOT supported in Consumption tier (requires built-in cache).
+//   DDoS/rate protection is provided by Azure Front Door WAF (waf.bicep).
 
 var loginEndpoint = environment().authentication.loginEndpoint
 var corsOriginsXml = join(map(allowedOrigins, origin => '<origin>${origin}</origin>'), '')
@@ -352,7 +353,7 @@ var validateJwtSnippet = authBypassEnabled ? '' : '<validate-jwt header-name="Au
 
 var forwardUserHeaderValue = authBypassEnabled ? '<value>bypass-dev-user</value>' : '<value>@(context.Request.Headers.GetValueOrDefault("Authorization", "").Replace("Bearer ", ""))</value>'
 
-var apimPolicyXml = '<policies><inbound><base />${validateJwtSnippet}<rate-limit-by-key calls="100" renewal-period="1" counter-key="@(context.Request.IpAddress)" increment-condition="@(context.Response.StatusCode &lt; 500)" /><cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override">${forwardUserHeaderValue}</set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
+var apimPolicyXml = '<policies><inbound><base />${validateJwtSnippet}<cors allow-credentials="false"><allowed-origins>${corsOriginsXml}</allowed-origins><allowed-methods><method>GET</method><method>POST</method><method>PATCH</method><method>DELETE</method><method>OPTIONS</method></allowed-methods><allowed-headers><header>Content-Type</header><header>Authorization</header><header>Idempotency-Key</header></allowed-headers></cors><set-header name="X-Forwarded-User" exists-action="override">${forwardUserHeaderValue}</set-header></inbound><backend><base /></backend><outbound><base /><set-header name="X-Content-Type-Options" exists-action="override"><value>nosniff</value></set-header><set-header name="X-Frame-Options" exists-action="override"><value>DENY</value></set-header><set-header name="Strict-Transport-Security" exists-action="override"><value>max-age=31536000; includeSubDomains</value></set-header><set-header name="Referrer-Policy" exists-action="override"><value>strict-origin-when-cross-origin</value></set-header><set-header name="Cache-Control" exists-action="override"><value>no-store</value></set-header></outbound><on-error><base /></on-error></policies>'
 
 resource apimApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01-preview' = {
   name: 'policy'
@@ -429,7 +430,8 @@ resource apimOperations 'Microsoft.ApiManagement/service/apis/operations@2023-05
   }
 }]
 
-// Health operation policy override: skip JWT validation
+// Health operation policy override: no JWT validation required for liveness checks.
+// rate-limit-by-key is NOT supported in Consumption tier — WAF provides flood protection.
 resource apimHealthPolicy 'Microsoft.ApiManagement/service/apis/operations/policies@2023-05-01-preview' = {
   name: '${apimService.name}/${apimApi.name}/health-get/policy'
   dependsOn: [apimOperations]
@@ -437,9 +439,7 @@ resource apimHealthPolicy 'Microsoft.ApiManagement/service/apis/operations/polic
     format: 'xml'
     value: '''<policies>
   <inbound>
-    <rate-limit-by-key calls="20" renewal-period="1"
-      counter-key="@(context.Request.IpAddress)"
-      increment-condition="@(context.Response.StatusCode &lt; 500)" />
+    <base />
   </inbound>
   <backend>
     <base />
