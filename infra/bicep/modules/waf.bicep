@@ -15,9 +15,15 @@ param appConfigName string
 @description('Short suffix appended to resource names to avoid collisions (lowercase alphanumeric, no hyphens)')
 param nameSuffix string = ''
 
+@description('Enable OWASP + BotManager managed rule sets — requires Premium_AzureFrontDoor SKU. Set false in sandbox to keep Standard SKU (no managed rules, WAF custom rules only).')
+param enableManagedWafRules bool = true
+
 // ─── Computed names ───────────────────────────────────────────────────────────
 
 var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
+
+// Standard supports custom rules only. Premium adds OWASP managed rule sets.
+var afdSku = enableManagedWafRules ? 'Premium_AzureFrontDoor' : 'Standard_AzureFrontDoor'
 
 // ─── App Configuration reference ─────────────────────────────────────────────
 
@@ -34,7 +40,7 @@ resource wafPolicy 'Microsoft.Network/frontDoorWebApplicationFirewallPolicies@20
   name: 'closWaf${stage}${nameSuffix}'
   location: 'global'
   sku: {
-    name: 'Standard_AzureFrontDoor'
+    name: afdSku
   }
   properties: {
     policySettings: {
@@ -42,7 +48,7 @@ resource wafPolicy 'Microsoft.Network/frontDoorWebApplicationFirewallPolicies@20
       enabledState: 'Enabled'
       requestBodyCheck: 'Enabled'
     }
-    managedRules: {
+    managedRules: enableManagedWafRules ? {
       managedRuleSets: [
         {
           ruleSetType: 'Microsoft_DefaultRuleSet'
@@ -54,7 +60,7 @@ resource wafPolicy 'Microsoft.Network/frontDoorWebApplicationFirewallPolicies@20
           ruleSetVersion: '1.0'
         }
       ]
-    }
+    } : {}
   }
 }
 
@@ -70,7 +76,7 @@ resource frontDoorProfile 'Microsoft.Cdn/profiles@2023-05-01' = {
   name: 'clos-afd-${stage}${kebabSuffix}'
   location: 'global'
   sku: {
-    name: 'Standard_AzureFrontDoor'
+    name: afdSku
   }
 }
 

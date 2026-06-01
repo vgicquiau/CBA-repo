@@ -51,6 +51,9 @@ param enableEmailNotifications bool = true
 @description('Skip APIM JWT validation — dev/sandbox only, NEVER enable in prod')
 param authBypassEnabled bool = false
 
+@description('Enable OWASP + BotManager managed WAF rules — requires Premium_AzureFrontDoor SKU. Set false in sandbox to use Standard SKU at lower cost.')
+param enableManagedWafRules bool = true
+
 // ─── Computed names ───────────────────────────────────────────────────────────
 
 var kebabSuffix = empty(nameSuffix) ? '' : '-${nameSuffix}'
@@ -180,6 +183,7 @@ module waf 'modules/waf.bicep' = {
     apimGatewayUrl: api.outputs.apiGatewayUrl
     appConfigName: appConfig.name
     nameSuffix: nameSuffix
+    enableManagedWafRules: enableManagedWafRules
   }
 }
 

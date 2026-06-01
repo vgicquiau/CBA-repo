@@ -42,6 +42,7 @@ param allowedOrigins = [
 // Sandbox-specific flags
 param enableEmailNotifications = false  // Microsoft.Communication not registered in sandbox
 param authBypassEnabled = true          // Skip JWT validation — Entra not configured in sandbox
+param enableManagedWafRules = false     // Managed rules require Premium SKU — use Standard in sandbox
 
 // Alerts email
 param adminEmail = 'gicquiau.vincent@gmail.com'
