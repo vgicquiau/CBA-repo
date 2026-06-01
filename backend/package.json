@@ -19,7 +19,7 @@
     "@clos/shared-types": "*",
     "jose": "5.9.6",
     "uuid": "10.0.0",
-    "zod": "3.23.8"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/node": "20.14.11",
