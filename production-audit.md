@@ -1,6 +1,6 @@
 # Production Audit — Le Clos Bon Accueil
 
-**Date** : 2026-05-29  
+**Date** : 2026-05-29 — Mis à jour : 2026-05-30 (post-remédiation AppSec, commit `0f39bcf`)  
 **Analyste** : Claude Code (DevOps/SRE review)
 
 ---
@@ -17,6 +17,7 @@
 | Notifications | Azure Service Bus Standard + ACS Email | Topic `clos-notifications-{stage}` |
 | Stockage fichiers | Azure Blob Storage (container `photos`, SAS token) + CDN `clos-cdn-photos-{stage}` | |
 | Monitoring | Log Analytics `clos-logs-{stage}` + App Insights `clos-insights-{stage}` + 5 alertes Azure Monitor | |
+| WAF | Azure Front Door Standard + WAF Policy Prevention mode (OWASP 2.1 + Bot Manager 1.0) | Devant APIM |
 | Secrets | Azure Key Vault `clos-kv-{stage}` + App Configuration `clos-appconfig-{stage}` | RBAC authorization |
 | IaC | Bicep — `main.bicep` + 6 modules (`data`, `auth`, `notifications`, `api`, `frontend`, `monitoring`) | |
 | CI/CD | GitHub Actions OIDC (4 workflows) | WIF, `azure/login@v2` |
@@ -42,6 +43,8 @@
 | CDN Profile | `clos-cdn-dev` | `clos-cdn-prod` |
 | CDN Endpoint SPA | `clos-cdn-web-dev` | `clos-cdn-web-prod` |
 | CDN Endpoint Photos | `clos-cdn-photos-dev` | `clos-cdn-photos-prod` |
+| Front Door (WAF) | `clos-afd-dev` | `clos-afd-prod` |
+| WAF Policy | `closWafdev` | `closWafprod` |
 
 ---
 
@@ -92,31 +95,29 @@ Les domaines `clos-bon-accueil.fr` et sous-domaines (`dev.*`, `api.*`, `cdn.*`) 
 
 ## Risques de sécurité identifiés
 
-### 🔴 CRITIQUE — `local.settings.json` absent du `.gitignore`
+> **Audit AppSec complet** réalisé le 2026-05-29 (voir `SECURITY_AUDIT.md`). 19 findings (SEV-001 à SEV-019, sévérités Critique → Info) tous résolus dans le commit `0f39bcf` du 2026-05-29.
 
-Le fichier `local.settings.json` (utilisé pour le développement local Azure Functions — contient `AzureWebJobsStorage`, connection strings Cosmos DB, etc.) **n'est pas dans `.gitignore`**. Si un développeur crée ce fichier et le commit accidentellement, des credentials Azure seraient exposés dans le repo.
+### ✅ CORRIGÉ — `local.settings.json` dans `.gitignore`
 
-**Correction immédiate** : ajouter `local.settings.json` au `.gitignore`.
+Le fichier était absent du `.gitignore` au moment de l'audit initial. **Corrigé** : `local.settings.json` est désormais à la ligne 16 du `.gitignore`.
 
-### 🟡 MOYEN — Bug APIM : health endpoint non réellement anonyme
+### ✅ CORRIGÉ — Bug APIM : health endpoint non réellement anonyme (SEV-004)
 
-Le handler `health.ts` déclare `authLevel: 'anonymous'` et l'opération APIM `health-get` a une policy d'override. Cependant, la policy d'opération appelle `<base />` en premier, ce qui exécute la policy API-level incluant `validate-jwt`. Le `<set-variable name="skipJwtValidation" value="true" />` ne désactive **pas** la validation JWT — c'est une variable sans effet sur la politique parente.
+La policy `health-get` appelait `<base />` inbound, héritant de `validate-jwt` API-level. **Corrigé** : la policy `health-get` n'appelle plus `<base />` inbound — uniquement `rate-limit-by-key`. `GET /v1/health` est désormais réellement anonyme.
 
-**Conséquence** : `GET /v1/health` exige un token JWT valide en production, contrairement à l'intention.
+### 🟢 BAS — Pas de `local.settings.json.example`
 
-**Correction** : supprimer `<base />` de la policy `health-get` et n'inclure que rate-limit + CORS.
-
-### 🟡 MOYEN — Pas de `local.settings.json.example`
-
-Aucun fichier d'exemple d'environnement local fourni. Les nouveaux développeurs ne savent pas quelles variables configurer pour développer en local.
+Aucun fichier d'exemple d'environnement local fourni. Non bloquant — le `PRODUCTION_GUIDE.md` (§3.5) documente les variables requises. Les Function Apps utilisent Managed Identity, donc le seul vrai prérequis local est `COSMOS_ENDPOINT` + `DefaultAzureCredential`.
 
 ### 🟢 BAS — `shared-types/dist/` commité
 
-Les artefacts de build de `shared-types` sont dans le repo (commits). C'est fonctionnel mais non conventionnel. Dans une vraie CI, `npm run build --workspace=shared-types` est lancé avant chaque usage. Pas bloquant.
+Les artefacts de build de `shared-types` sont dans le repo. Fonctionnel mais non conventionnel. Pas bloquant.
 
 ---
 
 ## Vérifications positives
+
+### Audit initial (2026-05-29)
 
 - ✅ Pas de secret dans le code — tout passe par `DefaultAzureCredential` + Managed Identity
 - ✅ CORS explicite dans APIM (liste blanche, jamais `*`)
@@ -129,6 +130,28 @@ Les artefacts de build de `shared-types` sont dans le repo (commits). C'est fonc
 - ✅ `WEBSITE_RUN_FROM_PACKAGE: 1` — package zip immutable (meilleures performances et sécurité)
 - ✅ GitHub Actions : `permissions: id-token: write` configuré pour WIF
 - ✅ `environment: production` dans deploy-prod.yml → approbation manuelle possible via GitHub
+
+### Post-remédiation AppSec (commit `0f39bcf`, 2026-05-29)
+
+- ✅ **SEV-001** — IP restrictions Function Apps : seul APIM peut atteindre les Function Apps (deny all autres IPs)
+- ✅ **SEV-002** — Webhook Entra (`auth-post-confirmation`) authentifié cryptographiquement via JWKS (`jose`) — plus de handler non protégé
+- ✅ **SEV-003** — `AzureWebJobsStorage` via Managed Identity (`__accountName`) sur les deux Function Apps ; `allowSharedKeyAccess: false` sur les Storage Accounts Functions — plus de clé Storage en clair
+- ✅ **SEV-004** — Policy `health-get` sans `<base />` inbound : `GET /v1/health` est réellement anonyme
+- ✅ **SEV-005** — Cosmos DB `disableLocalAuth: true` ; `COSMOS_KEY` env var supprimé du code — accès RBAC uniquement
+- ✅ **SEV-006** — RBAC Service Bus Sender scopé au topic (pas `resourceGroup`) ; Blob Contributor scopé au Storage Account dédié photos
+- ✅ **SEV-007** — Rôle ACS `Communication Services Email Sender` (GUID `b9a7eb27`) au lieu de `Contributor` (`b24988ac`)
+- ✅ **SEV-008** — Module `waf.bicep` : Azure Front Door Standard + WAF Policy Prevention mode (OWASP 2.1 + Bot Manager 1.0) devant APIM
+- ✅ **SEV-009** — Headers de sécurité dans la policy outbound APIM : `X-Content-Type-Options`, `X-Frame-Options`, `HSTS`, `Referrer-Policy`, `Cache-Control: no-store`
+- ✅ **SEV-010** — Validation Zod sémantique des dates : date calendaire valide, `start < end`, `start >= today` (côté guest)
+- ✅ **SEV-011** — `deleteUser` implémenté avec cascade (supprime bookings room + bookingRefs guest + user doc) — conformité RGPD
+- ✅ **SEV-012** — SAS token photo-upload restreint au `contentType: 'image/jpeg'`
+- ✅ **SEV-013** — GitHub Actions `secrets:` explicites sur `deploy-dev.yml` et `deploy-prod.yml` — plus de `secrets: inherit`
+- ✅ **SEV-014** — CodeQL analysis + `npm audit --audit-level=high` dans `pr.yml` ; `dependabot.yml` pour mises à jour hebdo npm + GitHub Actions
+- ✅ **SEV-015** — `NotFoundError` n'expose plus `entity`/`id` dans la réponse HTTP (`Resource not found` générique)
+- ✅ **SEV-016** — Headers sécurité CDN SPA via Bicep delivery rule : `X-Content-Type-Options`, `X-Frame-Options`, `HSTS`, `Referrer-Policy` ; CSP à injecter post-déploiement via CLI (voir `PRODUCTION_GUIDE.md §8.5`)
+- ✅ **SEV-017** — Versions npm épinglées (suppression `^`) pour `@azure/cosmos`, `@azure/identity`, `@azure/msal-browser`, `@azure/msal-react`
+- ✅ **SEV-018** — `POST /v1/admin/users/invite` retourne `501 NOT_IMPLEMENTED` (intégration Graph API en attente PM4) — plus de faux `201`
+- ✅ **SEV-019** — `deleteUser` ajouté à l'interface `IRepository` (cohérence interface/implémentation)
 
 ---
 
