@@ -36,7 +36,7 @@ jobs:
         # zip without -y so symlinks (workspace packages) are followed and included as real files
         run: cd backend && zip -r $GITHUB_WORKSPACE/backend-deploy.zip dist/ node_modules/ host.json package.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: build-artifacts
           path: |
